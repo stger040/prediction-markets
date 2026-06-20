@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:apis": "node scripts/test-connections.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.1",
