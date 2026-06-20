@@ -1,59 +1,56 @@
 /**
- * Arbitrage calculator
+ * Arbitrage calculator — works for any two-platform pair.
  *
- * Core logic: given two markets for the same event,
- * find the cheapest way to hold BOTH sides (YES on one, NO on the other).
- * If yesPrice + noPrice < 1.00, you have a guaranteed profit no matter what happens.
+ * Given a matched market pair, find the cheapest combination of:
+ *   - YES on platform A + NO on platform B
+ *   - YES on platform B + NO on platform A
  *
- * Example:
- *   Polymarket YES: 0.62  (62¢)
- *   Kalshi    NO:   0.35  (35¢)
- *   Total cost:     0.97  → profit = 3¢ per $1 wagered = 3.09% return
+ * If the cheapest combination costs < $1.00, the difference is
+ * guaranteed profit regardless of outcome.
  */
 
-import { NormalizedMarket, ArbitrageOpportunity, MarketPair } from './types';
+import { ArbitrageOpportunity, MarketPair } from './types';
+
+// Minimum profit to surface (fees eat into tiny spreads)
+const MIN_PROFIT_PCT = 0.005; // 0.5%
 
 export function calculateArbitrage(pair: MarketPair): ArbitrageOpportunity | null {
-  const { polymarket: poly, kalshi, matchScore } = pair;
+  const { marketA, marketB, matchScore } = pair;
 
-  // Find the best combination: buy YES on one platform, NO on the other
   const combinations = [
     {
-      buyYesOn: 'polymarket' as const,
-      buyNoOn: 'kalshi' as const,
-      yesPrice: poly.yesPrice,
-      noPrice: kalshi.noPrice,
+      buyYesOn: marketA.platform,
+      buyNoOn: marketB.platform,
+      yesMarket: marketA,
+      noMarket: marketB,
+      yesPrice: marketA.yesPrice,
+      noPrice: marketB.noPrice,
     },
     {
-      buyYesOn: 'kalshi' as const,
-      buyNoOn: 'polymarket' as const,
-      yesPrice: kalshi.yesPrice,
-      noPrice: poly.noPrice,
+      buyYesOn: marketB.platform,
+      buyNoOn: marketA.platform,
+      yesMarket: marketB,
+      noMarket: marketA,
+      yesPrice: marketB.yesPrice,
+      noPrice: marketA.noPrice,
     },
   ];
 
-  let best: (typeof combinations)[0] | null = null;
-  let bestCost = 1.0; // only interested in sub-1.00 combinations
-
+  let best = combinations[0];
   for (const combo of combinations) {
-    const cost = combo.yesPrice + combo.noPrice;
-    if (cost < bestCost) {
-      bestCost = cost;
+    if (combo.yesPrice + combo.noPrice < best.yesPrice + best.noPrice) {
       best = combo;
     }
   }
 
-  if (!best) return null;
-
   const combinedCost = best.yesPrice + best.noPrice;
   const profitPct = (1 - combinedCost) / combinedCost;
 
-  // Only surface opportunities with at least 0.5% profit (fees eat into smaller ones)
-  if (profitPct < 0.005) return null;
+  if (profitPct < MIN_PROFIT_PCT) return null;
 
   return {
-    id: `${poly.id}__${kalshi.id}`,
-    question: poly.question,
+    id: `${marketA.id}__${marketB.id}`,
+    question: marketA.question,
     matchScore,
     profitPct,
     buyYesOn: best.buyYesOn,
@@ -61,8 +58,8 @@ export function calculateArbitrage(pair: MarketPair): ArbitrageOpportunity | nul
     yesPrice: best.yesPrice,
     noPrice: best.noPrice,
     combinedCost,
-    polymarket: poly,
-    kalshi,
+    marketA: best.yesMarket,
+    marketB: best.noMarket,
     updatedAt: new Date().toISOString(),
   };
 }

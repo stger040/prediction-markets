@@ -1,8 +1,11 @@
+export type Platform = 'polymarket' | 'kalshi' | 'ibkr';
+
+export type AppMode = 'us' | 'global';
+
 export interface NormalizedMarket {
   id: string;
-  platform: 'polymarket' | 'kalshi';
+  platform: Platform;
   question: string;
-  // normalizedQuestion is the cleaned-up text used for matching
   normalizedQuestion: string;
   category: string;
   yesPrice: number;   // 0-1 probability
@@ -17,21 +20,35 @@ export interface NormalizedMarket {
 export interface ArbitrageOpportunity {
   id: string;
   question: string;
-  matchScore: number;         // 0-1 confidence that these are the same event
-  profitPct: number;          // e.g. 0.04 = 4% guaranteed profit
-  // Which side to buy on which platform
-  buyYesOn: 'polymarket' | 'kalshi';
-  buyNoOn: 'polymarket' | 'kalshi';
-  yesPrice: number;           // price to buy YES
-  noPrice: number;            // price to buy NO
-  combinedCost: number;       // yesPrice + noPrice (should be < 1.00 for arb)
-  polymarket: NormalizedMarket;
-  kalshi: NormalizedMarket;
+  matchScore: number;       // 0-1 confidence this is the same event
+  profitPct: number;        // e.g. 0.04 = 4% guaranteed profit
+  buyYesOn: Platform;
+  buyNoOn: Platform;
+  yesPrice: number;
+  noPrice: number;
+  combinedCost: number;     // yesPrice + noPrice; profit = 1 - combinedCost
+  marketA: NormalizedMarket;  // the platform you buy YES on
+  marketB: NormalizedMarket;  // the platform you buy NO on
   updatedAt: string;
 }
 
 export interface MarketPair {
-  polymarket: NormalizedMarket;
-  kalshi: NormalizedMarket;
+  marketA: NormalizedMarket;
+  marketB: NormalizedMarket;
   matchScore: number;
+}
+
+export interface ArbApiResponse {
+  opportunities: ArbitrageOpportunity[];
+  meta: {
+    platformACount: number;
+    platformBCount: number;
+    platformAName: string;
+    platformBName: string;
+    pairsFound: number;
+    opportunitiesFound: number;
+    usingDemoData: boolean;
+    fetchedAt: string;
+  };
+  error?: string;
 }

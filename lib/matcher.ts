@@ -1,27 +1,23 @@
 /**
- * Fuzzy market matcher — finds the same event across Polymarket and Kalshi.
+ * Fuzzy market matcher — identifies the same real-world event across two platforms.
  *
  * Strategy:
- * 1. Extract key "signal words" (nouns, numbers, dates, tickers) from each question
- * 2. Score pairs by keyword overlap + trigram similarity
- * 3. Return pairs above a confidence threshold
- *
- * This is the "unified API" concept from the original idea — normalizing the
- * slight differences in how each platform words the same bet.
+ * 1. Extract "signal" tokens (numbers, tickers, key nouns) from each question
+ * 2. Score pairs by trigram similarity + keyword overlap
+ * 3. Numbers carry strong signal — mismatched numbers penalize the score heavily
+ * 4. Return the best match per marketA above the confidence threshold
  */
 
 import { NormalizedMarket, MarketPair } from './types';
 
-// Minimum match score to consider two markets the same event (0-1)
 const MATCH_THRESHOLD = 0.45;
 
-// Words that carry no signal for matching
 const STOP_WORDS = new Set([
   'will', 'the', 'a', 'an', 'be', 'is', 'are', 'was', 'were',
   'have', 'has', 'had', 'do', 'does', 'did', 'by', 'at', 'in',
   'on', 'to', 'of', 'for', 'with', 'above', 'below', 'end',
   'before', 'after', 'during', 'this', 'that', 'or', 'and',
-  'not', 'no', 'yes', 'per', 'rate',
+  'not', 'no', 'yes', 'per', 'rate', 'more', 'than',
 ]);
 
 function tokenize(text: string): string[] {
@@ -59,8 +55,7 @@ function keywordOverlap(tokensA: string[], tokensB: string[]): number {
   return union === 0 ? 0 : matches / union;
 }
 
-// Numbers and year references carry strong signal — boost them
-function extractSignalNumbers(text: string): string[] {
+function extractNumbers(text: string): string[] {
   return (text.match(/\d+(\.\d+)?[km%]?/gi) || []).map(n => n.toLowerCase());
 }
 
@@ -70,14 +65,14 @@ export function scoreMarketMatch(a: NormalizedMarket, b: NormalizedMarket): numb
 
   const tokA = tokenize(qA);
   const tokB = tokenize(qB);
-  const numsA = extractSignalNumbers(qA);
-  const numsB = extractSignalNumbers(qB);
+  const numsA = extractNumbers(qA);
+  const numsB = extractNumbers(qB);
 
   const trig = trigramSimilarity(qA, qB);
   const overlap = keywordOverlap(tokA, tokB);
   const numOverlap = keywordOverlap(numsA, numsB);
 
-  // If one question contains a specific number the other doesn't, they're probably different events
+  // If both questions have numbers but they don't match, heavily penalize
   const numPenalty = numsA.length > 0 && numsB.length > 0 && numOverlap < 0.3 ? 0.5 : 1.0;
 
   const raw = (trig * 0.5 + overlap * 0.4 + numOverlap * 0.1) * numPenalty;
@@ -85,28 +80,27 @@ export function scoreMarketMatch(a: NormalizedMarket, b: NormalizedMarket): numb
 }
 
 export function findMarketPairs(
-  polyMarkets: NormalizedMarket[],
-  kalshiMarkets: NormalizedMarket[],
+  marketsA: NormalizedMarket[],
+  marketsB: NormalizedMarket[],
 ): MarketPair[] {
   const pairs: MarketPair[] = [];
 
-  for (const poly of polyMarkets) {
+  for (const mA of marketsA) {
     let bestScore = MATCH_THRESHOLD;
-    let bestKalshi: NormalizedMarket | null = null;
+    let bestB: NormalizedMarket | null = null;
 
-    for (const kalshi of kalshiMarkets) {
-      const score = scoreMarketMatch(poly, kalshi);
+    for (const mB of marketsB) {
+      const score = scoreMarketMatch(mA, mB);
       if (score > bestScore) {
         bestScore = score;
-        bestKalshi = kalshi;
+        bestB = mB;
       }
     }
 
-    if (bestKalshi) {
-      pairs.push({ polymarket: poly, kalshi: bestKalshi, matchScore: bestScore });
+    if (bestB) {
+      pairs.push({ marketA: mA, marketB: bestB, matchScore: bestScore });
     }
   }
 
-  // Sort by match confidence descending
   return pairs.sort((a, b) => b.matchScore - a.matchScore);
 }

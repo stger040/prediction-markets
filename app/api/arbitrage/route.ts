@@ -1,3 +1,7 @@
+/**
+ * Global Mode arbitrage: Kalshi vs Polymarket
+ * Legal for users outside the US.
+ */
 import { NextResponse } from 'next/server';
 import { fetchPolymarketMarkets } from '@/lib/polymarket';
 import { fetchKalshiMarkets } from '@/lib/kalshi';
@@ -19,8 +23,10 @@ export async function GET() {
     return NextResponse.json({
       opportunities,
       meta: {
-        polymarketCount: polymarkets.length,
-        kalshiCount: kalshiMarkets.length,
+        platformACount: polymarkets.length,
+        platformBCount: kalshiMarkets.length,
+        platformAName: 'Polymarket',
+        platformBName: 'Kalshi',
         pairsFound: pairs.length,
         opportunitiesFound: opportunities.length,
         usingDemoData: !process.env.KALSHI_EMAIL,
