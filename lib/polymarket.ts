@@ -54,7 +54,7 @@ export async function fetchPolymarketMarkets(): Promise<NormalizedMarket[]> {
   const params = new URLSearchParams({
     active: 'true',
     closed: 'false',
-    limit: '100',
+    limit: '500',
     order: 'volume24hr',
     ascending: 'false',
   });
