@@ -55,6 +55,7 @@ export default function Home() {
   }, [mode, fetchOpportunities]);
 
   const opportunities = data?.opportunities ?? [];
+  const nearMisses    = data?.nearMisses    ?? [];
 
   return (
     <>
@@ -116,7 +117,7 @@ export default function Home() {
             Array.from({ length: 4 }).map((_, i) => <ArbitrageCardSkeleton key={i} />)
           )}
 
-          {!isLoading && opportunities.length === 0 && !error && (
+          {!isLoading && opportunities.length === 0 && nearMisses.length === 0 && !error && (
             <div className="text-center py-16">
               <TrendingUp className="w-10 h-10 text-gray-600 mx-auto mb-3" />
               <p className="text-gray-400 font-semibold">No arbitrage opportunities right now</p>
@@ -136,6 +137,33 @@ export default function Home() {
               onExecute={setTradeOpp}
             />
           ))}
+
+          {/* Near misses — profitable before fees; verify actual Kalshi fee per market */}
+          {!isLoading && nearMisses.length > 0 && (
+            <div className="mt-6">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="flex-1 h-px bg-white/5" />
+                <p className="text-xs text-gray-600 font-semibold uppercase tracking-wider px-2">
+                  Near Misses — Profitable before {((data?.meta.kalshiFeeEstimate ?? 0.03) * 100).toFixed(0)}% Kalshi fee
+                </p>
+                <div className="flex-1 h-px bg-white/5" />
+              </div>
+              <p className="text-xs text-gray-700 text-center mb-3">
+                These pairs have positive gross profit but Kalshi&apos;s estimated fee wipes it out.
+                Check the actual fee on each Kalshi market — it varies and may be lower.
+              </p>
+              {nearMisses.map((opp, idx) => (
+                <ArbitrageCard
+                  key={opp.id}
+                  opportunity={opp}
+                  rank={idx + 1}
+                  isBlurred={false}
+                  isNearMiss
+                  onUpgrade={() => setShowUpgrade(true)}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Upgrade CTA */}

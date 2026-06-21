@@ -14,7 +14,7 @@ import { NextResponse } from 'next/server';
 import { fetchKalshiMarkets } from '@/lib/kalshi';
 import { fetchIBKRMarkets } from '@/lib/ibkr';
 import { findMarketPairs } from '@/lib/matcher';
-import { rankOpportunities } from '@/lib/arbitrage';
+import { rankOpportunities, PAYOUT_FEE } from '@/lib/arbitrage';
 
 export const dynamic = 'force-dynamic'; // Always fresh — never cache for live arb
 
@@ -27,12 +27,13 @@ export async function GET() {
 
     // Kalshi is marketA, IBKR is marketB — matcher works on normalized questions
     const pairs = findMarketPairs(kalshiMarkets, ibkrMarkets);
-    const opportunities = rankOpportunities(pairs);
+    const { opportunities, nearMisses } = rankOpportunities(pairs);
 
     const usingDemoData = !process.env.IBKR_HOST || kalshiMarkets[0]?.id === 'FED-26JUL';
 
     return NextResponse.json({
       opportunities,
+      nearMisses,
       meta: {
         platformACount: kalshiMarkets.length,
         platformBCount: ibkrMarkets.length,
@@ -40,6 +41,8 @@ export async function GET() {
         platformBName: 'IBKR ForecastEx',
         pairsFound: pairs.length,
         opportunitiesFound: opportunities.length,
+        nearMissCount: nearMisses.length,
+        kalshiFeeEstimate: PAYOUT_FEE.kalshi,
         usingDemoData,
         fetchedAt: new Date().toISOString(),
       },

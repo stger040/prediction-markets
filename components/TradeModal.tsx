@@ -31,7 +31,7 @@ export function TradeModal({ opportunity: opp, onClose }: TradeModalProps) {
 
   const totalCost    = (opp.yesPrice + opp.noPrice) * contracts;
   const profitDollar = (1 - opp.yesPrice - opp.noPrice) * contracts;
-  const profitPct    = opp.profitPct * 100;
+  const profitPct    = opp.netProfitPct * 100;
 
   async function executeTrade() {
     if (!opp) return;

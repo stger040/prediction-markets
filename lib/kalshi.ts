@@ -98,58 +98,90 @@ export function normalizeKalshiQuestion(title: string, subtitle: string): string
     .trim();
 }
 
+function normalizeKalshiMarket(m: KalshiMarket): NormalizedMarket {
+  const subtitle = m.subtitle || m.yes_sub_title || '';
+  const question = (subtitle && subtitle !== m.title)
+    ? `${m.title}: ${subtitle}`
+    : m.title;
+
+  const yes = parsePrice(
+    m.yes_bid_dollars ?? m.yes_ask_dollars,
+    m.yes_bid ?? m.yes_ask,
+  );
+  const no = parsePrice(
+    m.no_bid_dollars ?? m.no_ask_dollars,
+    m.no_bid ?? m.no_ask,
+  );
+
+  return {
+    id: m.ticker,
+    platform: 'kalshi',
+    question,
+    normalizedQuestion: normalizeKalshiQuestion(m.title, subtitle),
+    category: m.category || 'General',
+    yesPrice: yes,
+    noPrice: no,
+    volume24h: (parseFloat(m.volume_24h_fp ?? '') || m.volume_24h) ?? m.volume ?? 0,
+    liquidity: (parseFloat(m.liquidity_dollars ?? '') || m.liquidity) ?? 0,
+    endDate: m.close_time,
+    url: `https://kalshi.com/markets/${m.ticker}`,
+    slug: m.ticker,
+  };
+}
+
+interface KalshiEvent {
+  event_ticker: string;
+  title: string;
+  sub_title?: string;
+  category?: string;
+  status: string;
+  markets?: KalshiMarket[];
+}
+
 export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
   try {
-    // /markets is a public endpoint — no auth headers required
+    // Use /events endpoint — returns topic-level groupings (Fed, Bitcoin, Politics)
+    // and avoids the KXMV combo market flood that dominates /markets.
     const res = await fetch(
-      `${KALSHI_API}/markets?status=open&limit=100`,
+      `${KALSHI_API}/events?status=open&limit=200&with_nested_markets=true`,
       { headers: { 'Content-Type': 'application/json' } },
     );
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      console.error(`[Kalshi] API error ${res.status}: ${body.slice(0, 200)}`);
+      console.error(`[Kalshi] Events API error ${res.status}: ${body.slice(0, 200)}`);
       return getDemoKalshiMarkets();
     }
 
-    const data: { markets: KalshiMarket[]; cursor?: string } = await res.json();
-    console.log(`[Kalshi] Fetched ${data.markets?.length ?? 0} live markets`);
+    const data: { events?: KalshiEvent[]; cursor?: string } = await res.json();
+    const events = data.events ?? [];
+    console.log(`[Kalshi] Fetched ${events.length} events`);
 
-    if (!data.markets?.length) {
-      console.warn('[Kalshi] Empty markets array — returning demo data');
+    if (!events.length) {
+      console.warn('[Kalshi] No events returned — returning demo data');
       return getDemoKalshiMarkets();
     }
 
-    return data.markets
-      .filter(m => m.status === 'open')
-      .map((m): NormalizedMarket => {
-        const subtitle = m.subtitle || m.yes_sub_title || '';
+    const markets: NormalizedMarket[] = [];
+    for (const event of events) {
+      // Skip KXMV combo/parlay events
+      if (event.event_ticker?.toUpperCase().startsWith('KXMV')) continue;
+      // Skip closed/settled events
+      if (event.status === 'settled' || event.status === 'determined' || event.status === 'closed') continue;
 
-        // Prefer _dollars string fields; fall back to legacy cent integers
-        const yes = parsePrice(
-          m.yes_bid_dollars ?? m.yes_ask_dollars,
-          m.yes_bid ?? m.yes_ask,
-        );
-        const no = parsePrice(
-          m.no_bid_dollars ?? m.no_ask_dollars,
-          m.no_bid ?? m.no_ask,
-        );
+      for (const m of event.markets ?? []) {
+        markets.push(normalizeKalshiMarket(m));
+      }
+    }
 
-        return {
-          id: m.ticker,
-          platform: 'kalshi',
-          question: subtitle ? `${m.title}: ${subtitle}` : m.title,
-          normalizedQuestion: normalizeKalshiQuestion(m.title, subtitle),
-          category: m.category || 'General',
-          yesPrice: yes,
-          noPrice: no,
-          volume24h: (parseFloat(m.volume_24h_fp ?? '') || m.volume_24h) ?? m.volume ?? 0,
-          liquidity: (parseFloat(m.liquidity_dollars ?? '') || m.liquidity) ?? 0,
-          endDate: m.close_time,
-          url: `https://kalshi.com/markets/${m.ticker}`,
-          slug: m.ticker,
-        };
-      });
+    console.log(`[Kalshi] ${markets.length} markets from ${events.length} events (after KXMV filter)`);
+
+    if (!markets.length) {
+      console.warn('[Kalshi] All events were KXMV or had no markets — returning demo data');
+      return getDemoKalshiMarkets();
+    }
+
+    return markets;
   } catch (err) {
     console.error('[Kalshi] Request failed:', err instanceof Error ? err.message : err);
     return getDemoKalshiMarkets();

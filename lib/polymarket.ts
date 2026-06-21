@@ -50,53 +50,80 @@ export function normalizePolymarketQuestion(q: string): string {
     .trim();
 }
 
-export async function fetchPolymarketMarkets(): Promise<NormalizedMarket[]> {
+async function fetchPage(offset: number): Promise<PolymarketMarket[]> {
   const params = new URLSearchParams({
     active: 'true',
     closed: 'false',
     limit: '100',
+    offset: String(offset),
     order: 'volume24hr',
     ascending: 'false',
   });
 
-  const res = await fetch(`${GAMMA_API}/markets?${params}`, {
-    headers: { 'Accept': 'application/json' },
-    next: { revalidate: 30 },
+  try {
+    const res = await fetch(`${GAMMA_API}/markets?${params}`, {
+      headers: { 'Accept': 'application/json' },
+      next: { revalidate: 30 },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeMarket(m: PolymarketMarket): NormalizedMarket {
+  const { yes, no } = parsePrice(m.outcomePrices, m.outcomes);
+
+  let clobTokenIds: [string, string] | undefined;
+  if (m.clobTokenIds) {
+    try {
+      const ids: string[] = JSON.parse(m.clobTokenIds);
+      if (ids.length >= 2) clobTokenIds = [ids[0], ids[1]];
+    } catch { /* ignore */ }
+  }
+
+  return {
+    id: m.id,
+    platform: 'polymarket',
+    question: m.question,
+    normalizedQuestion: normalizePolymarketQuestion(m.question),
+    category: m.category || 'General',
+    yesPrice: yes,
+    noPrice: no,
+    volume24h: m.volume ?? 0,
+    liquidity: m.liquidity ?? 0,
+    endDate: m.endDate,
+    url: `https://polymarket.com/event/${m.slug}`,
+    slug: m.slug,
+    conditionId: m.conditionId,
+    clobTokenIds,
+  };
+}
+
+export async function fetchPolymarketMarkets(): Promise<NormalizedMarket[]> {
+  // Gamma API caps at 100 per request — fetch 12 pages in parallel to reach ~1200 markets.
+  // Top 100 by volume are often dominated by a single event (e.g. World Cup 2026);
+  // pages 2-12 expose the economics/politics/crypto markets that Kalshi also covers.
+  const pages = await Promise.all(
+    [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100].map(fetchPage)
+  );
+  const raw = pages.flat();
+
+  // Deduplicate by id
+  const seen = new Set<string>();
+  const unique = raw.filter(m => {
+    if (seen.has(m.id)) return false;
+    seen.add(m.id);
+    return true;
   });
 
-  if (!res.ok) throw new Error(`Polymarket API error: ${res.status}`);
+  console.log(`[Polymarket] Fetched ${unique.length} unique markets across ${pages.length} pages`);
 
-  const data: PolymarketMarket[] = await res.json();
+  if (!unique.length) throw new Error('Polymarket API returned no markets');
 
-  return data
+  return unique
     .filter(m => m.active && !m.closed && m.outcomePrices && m.outcomes)
-    .map((m): NormalizedMarket => {
-      const { yes, no } = parsePrice(m.outcomePrices, m.outcomes);
-
-      // Parse CLOB token IDs if available — [0]=YES token, [1]=NO token
-      let clobTokenIds: [string, string] | undefined;
-      if (m.clobTokenIds) {
-        try {
-          const ids: string[] = JSON.parse(m.clobTokenIds);
-          if (ids.length >= 2) clobTokenIds = [ids[0], ids[1]];
-        } catch { /* ignore */ }
-      }
-
-      return {
-        id: m.id,
-        platform: 'polymarket',
-        question: m.question,
-        normalizedQuestion: normalizePolymarketQuestion(m.question),
-        category: m.category || 'General',
-        yesPrice: yes,
-        noPrice: no,
-        volume24h: m.volume ?? 0,
-        liquidity: m.liquidity ?? 0,
-        endDate: m.endDate,
-        url: `https://polymarket.com/event/${m.slug}`,
-        slug: m.slug,
-        conditionId: m.conditionId,
-        clobTokenIds,
-      };
-    });
+    .map(normalizeMarket);
 }
