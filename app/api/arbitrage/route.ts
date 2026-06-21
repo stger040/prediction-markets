@@ -11,8 +11,8 @@ import { rankOpportunities } from '@/lib/arbitrage';
 export const dynamic = 'force-dynamic'; // never cache — always fresh prices
 
 export async function GET() {
-  // Visible in Vercel logs — confirms API key is loaded
-  console.log('[arbitrage] KALSHI_API_KEY_ID set:', !!process.env.KALSHI_API_KEY_ID);
+  // Log helps confirm the route is running fresh (force-dynamic)
+  console.log('[arbitrage] Fetching live data at', new Date().toISOString());
 
   try {
     const [polymarkets, kalshiMarkets] = await Promise.all([
@@ -32,7 +32,7 @@ export async function GET() {
         platformBName: 'Kalshi',
         pairsFound: pairs.length,
         opportunitiesFound: opportunities.length,
-        usingDemoData: !process.env.KALSHI_API_KEY_ID,
+        usingDemoData: kalshiMarkets.length === 6 && kalshiMarkets[0].id === 'FED-26JUL',
         fetchedAt: new Date().toISOString(),
       },
     });
