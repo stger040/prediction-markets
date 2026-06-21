@@ -8,9 +8,12 @@ import { fetchKalshiMarkets } from '@/lib/kalshi';
 import { findMarketPairs } from '@/lib/matcher';
 import { rankOpportunities } from '@/lib/arbitrage';
 
-export const revalidate = 30;
+export const dynamic = 'force-dynamic'; // never cache — always fresh prices
 
 export async function GET() {
+  // Visible in Vercel logs — confirms env vars are loaded
+  console.log('[arbitrage] KALSHI_EMAIL set:', !!process.env.KALSHI_EMAIL);
+
   try {
     const [polymarkets, kalshiMarkets] = await Promise.all([
       fetchPolymarketMarkets(),
