@@ -10,7 +10,7 @@
 
 import { NormalizedMarket, MarketPair } from './types';
 
-const MATCH_THRESHOLD = 0.45;
+const MATCH_THRESHOLD = 0.65;
 
 const STOP_WORDS = new Set([
   'will', 'the', 'a', 'an', 'be', 'is', 'are', 'was', 'were',
