@@ -1,62 +1,89 @@
 /**
  * Kalshi API client
- * Kalshi requires an API key (email+password login) for most endpoints.
- * Set KALSHI_EMAIL and KALSHI_PASSWORD in .env.local to use real data.
- * Without credentials, this module returns realistic demo data so the
- * app works immediately and you can see what it will look like.
  *
- * To get credentials: sign up at https://kalshi.com
- * Then add to .env.local:
- *   KALSHI_EMAIL=your@email.com
- *   KALSHI_PASSWORD=yourpassword
+ * The /markets endpoint is public — no authentication required to read prices.
+ * Auth (KALSHI_API_KEY_ID + KALSHI_PRIVATE_KEY) is only needed for private
+ * endpoints like placing orders or viewing portfolio.
+ *
+ * Production base URL: https://external-api.kalshi.com/trade-api/v2
+ *
+ * Price fields use the post-fixed-point-migration format:
+ *   yes_bid_dollars / yes_ask_dollars — string, e.g. "0.5600"
  */
 
 import { NormalizedMarket } from './types';
+import { createSign, constants } from 'crypto';
 
-const KALSHI_API = 'https://trading-api.kalshi.com/trade-api/v2';
+const KALSHI_BASE = 'https://external-api.kalshi.com';
+const KALSHI_API  = `${KALSHI_BASE}/trade-api/v2`;
+
+// Auth headers — only needed for portfolio/order endpoints, NOT for /markets.
+// Signing follows the official Kalshi JS example exactly:
+//   createSign('RSA-SHA256') + RSA_PKCS1_PSS_PADDING + RSA_PSS_SALTLEN_DIGEST
+export function makeKalshiAuthHeaders(method: string, path: string): Record<string, string> {
+  const keyId      = process.env.KALSHI_API_KEY_ID ?? '';
+  const rawKey     = process.env.KALSHI_PRIVATE_KEY ?? '';
+  // Vercel may store multiline values with literal \n — restore real newlines
+  const privateKey = rawKey.replace(/\\n/g, '\n');
+
+  const timestamp   = Date.now().toString();
+  // Message = timestamp + METHOD + path_without_query
+  // e.g. "1703123456789GET/trade-api/v2/portfolio/balance"
+  const pathNoQuery = path.split('?')[0];
+  const msgString   = timestamp + method.toUpperCase() + pathNoQuery;
+
+  const signer = createSign('RSA-SHA256');
+  signer.update(msgString);
+  signer.end();
+  const signature = signer.sign(
+    {
+      key: privateKey,
+      padding: constants.RSA_PKCS1_PSS_PADDING,
+      saltLength: constants.RSA_PSS_SALTLEN_DIGEST,
+    },
+    'base64',
+  );
+
+  return {
+    'Content-Type': 'application/json',
+    'KALSHI-ACCESS-KEY': keyId,
+    'KALSHI-ACCESS-TIMESTAMP': timestamp,
+    'KALSHI-ACCESS-SIGNATURE': signature,
+  };
+}
 
 interface KalshiMarket {
   ticker: string;
+  event_ticker?: string;
   title: string;
-  subtitle: string;
-  category: string;
-  yes_bid: number;  // in cents (0-100)
-  yes_ask: number;
-  no_bid: number;
-  no_ask: number;
-  volume: number;
-  liquidity: number;
-  close_time: string;
+  subtitle?: string;
+  yes_sub_title?: string;
+  no_sub_title?: string;
+  category?: string;
   status: string;
+  close_time: string;
+  // Fixed-point string price fields (current API)
+  yes_bid_dollars?: string;
+  yes_ask_dollars?: string;
+  no_bid_dollars?: string;
+  no_ask_dollars?: string;
+  volume_fp?: string;
+  volume_24h_fp?: string;
+  liquidity_dollars?: string;
+  // Legacy integer cent fields (0–100), kept for safety
+  yes_bid?: number;
+  yes_ask?: number;
+  no_bid?: number;
+  no_ask?: number;
+  volume?: number;
+  volume_24h?: number;
+  liquidity?: number;
 }
 
-interface KalshiAuthResponse {
-  token: string;
-  member_id: string;
-}
-
-let cachedToken: string | null = null;
-let tokenExpiry: number = 0;
-
-async function getKalshiToken(): Promise<string | null> {
-  const email = process.env.KALSHI_EMAIL;
-  const password = process.env.KALSHI_PASSWORD;
-  if (!email || !password) return null;
-
-  if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
-
-  const res = await fetch(`${KALSHI_API}/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-
-  if (!res.ok) return null;
-
-  const data: KalshiAuthResponse = await res.json();
-  cachedToken = data.token;
-  tokenExpiry = Date.now() + 23 * 60 * 60 * 1000; // 23 hours
-  return cachedToken;
+function parsePrice(dollars?: string, cents?: number): number {
+  if (dollars !== undefined && dollars !== '') return parseFloat(dollars);
+  if (cents !== undefined) return cents / 100;
+  return 0.5;
 }
 
 export function normalizeKalshiQuestion(title: string, subtitle: string): string {
@@ -72,125 +99,189 @@ export function normalizeKalshiQuestion(title: string, subtitle: string): string
 }
 
 export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
-  const token = await getKalshiToken();
+  try {
+    // /markets is a public endpoint — no auth headers required
+    const res = await fetch(
+      `${KALSHI_API}/markets?status=open&limit=100`,
+      { headers: { 'Content-Type': 'application/json' } },
+    );
 
-  if (!token) {
-    console.warn('[Kalshi] No credentials — returning demo data. Set KALSHI_EMAIL and KALSHI_PASSWORD in .env.local');
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`[Kalshi] API error ${res.status}: ${body.slice(0, 200)}`);
+      return getDemoKalshiMarkets();
+    }
+
+    const data: { markets: KalshiMarket[]; cursor?: string } = await res.json();
+    console.log(`[Kalshi] Fetched ${data.markets?.length ?? 0} live markets`);
+
+    if (!data.markets?.length) {
+      console.warn('[Kalshi] Empty markets array — returning demo data');
+      return getDemoKalshiMarkets();
+    }
+
+    return data.markets
+      .filter(m => m.status === 'open')
+      .map((m): NormalizedMarket => {
+        const subtitle = m.subtitle || m.yes_sub_title || '';
+
+        // Prefer _dollars string fields; fall back to legacy cent integers
+        const yes = parsePrice(
+          m.yes_bid_dollars ?? m.yes_ask_dollars,
+          m.yes_bid ?? m.yes_ask,
+        );
+        const no = parsePrice(
+          m.no_bid_dollars ?? m.no_ask_dollars,
+          m.no_bid ?? m.no_ask,
+        );
+
+        return {
+          id: m.ticker,
+          platform: 'kalshi',
+          question: subtitle ? `${m.title}: ${subtitle}` : m.title,
+          normalizedQuestion: normalizeKalshiQuestion(m.title, subtitle),
+          category: m.category || 'General',
+          yesPrice: yes,
+          noPrice: no,
+          volume24h: (parseFloat(m.volume_24h_fp ?? '') || m.volume_24h) ?? m.volume ?? 0,
+          liquidity: (parseFloat(m.liquidity_dollars ?? '') || m.liquidity) ?? 0,
+          endDate: m.close_time,
+          url: `https://kalshi.com/markets/${m.ticker}`,
+          slug: m.ticker,
+        };
+      });
+  } catch (err) {
+    console.error('[Kalshi] Request failed:', err instanceof Error ? err.message : err);
     return getDemoKalshiMarkets();
   }
+}
 
-  const res = await fetch(`${KALSHI_API}/markets?status=open&limit=100`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/json',
-    },
-    next: { revalidate: 30 },
+export interface KalshiOrderParams {
+  ticker: string;
+  side: 'yes' | 'no';
+  contracts: number;       // integer, 1 contract = 1 share
+  priceCents: number;      // 0-100, e.g. 45 = $0.45/share
+  clientOrderId?: string;
+}
+
+export interface KalshiOrderResult {
+  orderId: string;
+  status: string;
+}
+
+export async function placeKalshiOrder(params: KalshiOrderParams): Promise<KalshiOrderResult> {
+  const path = '/trade-api/v2/portfolio/orders';
+  const headers = makeKalshiAuthHeaders('POST', path);
+
+  // Kalshi v2 uses yes_price_cents / no_price_cents (integer 0-100), not a generic "price" field.
+  // The exchange is single-book (YES-perspective), so only send the price for the side being bought.
+  const body: Record<string, unknown> = {
+    ticker:          params.ticker,
+    action:          'buy',
+    type:            'limit',
+    side:            params.side,
+    count:           params.contracts,
+    time_in_force:   'good_till_canceled',
+    client_order_id: params.clientOrderId ?? `arb-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+  };
+  if (params.side === 'yes') {
+    body.yes_price_cents = params.priceCents;
+  } else {
+    body.no_price_cents = params.priceCents;
+  }
+
+  const res = await fetch(`${KALSHI_API}/portfolio/orders`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
-    console.error(`[Kalshi] API error: ${res.status}`);
-    return getDemoKalshiMarkets();
+    const text = await res.text().catch(() => '');
+    throw new Error(`Kalshi order failed (${res.status}): ${text.slice(0, 300)}`);
   }
 
-  const data: { markets: KalshiMarket[] } = await res.json();
-
-  return data.markets
-    .filter(m => m.status === 'open')
-    .map((m): NormalizedMarket => {
-      // Kalshi prices are in cents (0-100), normalize to 0-1
-      const yes = ((m.yes_bid + m.yes_ask) / 2) / 100;
-      const no = ((m.no_bid + m.no_ask) / 2) / 100;
-      return {
-        id: m.ticker,
-        platform: 'kalshi',
-        question: m.subtitle ? `${m.title}: ${m.subtitle}` : m.title,
-        normalizedQuestion: normalizeKalshiQuestion(m.title, m.subtitle),
-        category: m.category || 'General',
-        yesPrice: yes,
-        noPrice: no,
-        volume24h: m.volume ?? 0,
-        liquidity: m.liquidity ?? 0,
-        endDate: m.close_time,
-        url: `https://kalshi.com/markets/${m.ticker}`,
-        slug: m.ticker,
-      };
-    });
+  const data = await res.json();
+  return {
+    orderId: data.order?.order_id ?? '',
+    status: data.order?.status ?? 'submitted',
+  };
 }
 
-// Realistic demo data mirroring real Kalshi markets (used when no API key is set)
+// Demo data — only shown when the live API is unreachable
 function getDemoKalshiMarkets(): NormalizedMarket[] {
   const demos: Array<Omit<NormalizedMarket, 'platform' | 'normalizedQuestion'> & { question: string }> = [
     {
-      id: 'FED-25JUL',
-      question: 'Fed rate cut in July 2025?',
+      id: 'FED-26JUL',
+      question: 'Fed rate cut in July 2026?',
       category: 'Economics',
-      yesPrice: 0.62,
-      noPrice: 0.39,
-      volume24h: 1_200_000,
-      liquidity: 450_000,
-      endDate: '2025-07-31',
-      url: 'https://kalshi.com/markets/FED-25JUL',
-      slug: 'FED-25JUL',
+      yesPrice: 0.38,
+      noPrice: 0.63,
+      volume24h: 1_800_000,
+      liquidity: 620_000,
+      endDate: '2026-07-30',
+      url: 'https://kalshi.com/markets/FED-26JUL',
+      slug: 'FED-26JUL',
     },
     {
-      id: 'USGDP-25Q2',
-      question: 'US GDP positive growth Q2 2025?',
+      id: 'USGDP-26Q2',
+      question: 'US GDP positive growth Q2 2026?',
       category: 'Economics',
-      yesPrice: 0.71,
-      noPrice: 0.30,
-      volume24h: 890_000,
-      liquidity: 310_000,
-      endDate: '2025-07-30',
-      url: 'https://kalshi.com/markets/USGDP-25Q2',
-      slug: 'USGDP-25Q2',
+      yesPrice: 0.67,
+      noPrice: 0.34,
+      volume24h: 940_000,
+      liquidity: 380_000,
+      endDate: '2026-07-30',
+      url: 'https://kalshi.com/markets/USGDP-26Q2',
+      slug: 'USGDP-26Q2',
     },
     {
-      id: 'BTC-60K-JUN',
-      question: 'Bitcoin above $60,000 end of June 2025?',
+      id: 'BTC-100K-JUL26',
+      question: 'Bitcoin above $100,000 end of July 2026?',
       category: 'Crypto',
-      yesPrice: 0.44,
-      noPrice: 0.58,
-      volume24h: 2_100_000,
-      liquidity: 980_000,
-      endDate: '2025-06-30',
-      url: 'https://kalshi.com/markets/BTC-60K-JUN',
-      slug: 'BTC-60K-JUN',
+      yesPrice: 0.51,
+      noPrice: 0.50,
+      volume24h: 3_200_000,
+      liquidity: 1_100_000,
+      endDate: '2026-07-31',
+      url: 'https://kalshi.com/markets/BTC-100K-JUL26',
+      slug: 'BTC-100K-JUL26',
     },
     {
-      id: 'UNEMP-MAY25',
-      question: 'US unemployment below 4.5% in May 2025?',
+      id: 'UNEMP-JUN26',
+      question: 'US unemployment below 4.5% in June 2026?',
       category: 'Economics',
-      yesPrice: 0.81,
-      noPrice: 0.20,
-      volume24h: 540_000,
-      liquidity: 190_000,
-      endDate: '2025-06-07',
-      url: 'https://kalshi.com/markets/UNEMP-MAY25',
-      slug: 'UNEMP-MAY25',
+      yesPrice: 0.74,
+      noPrice: 0.27,
+      volume24h: 610_000,
+      liquidity: 210_000,
+      endDate: '2026-07-02',
+      url: 'https://kalshi.com/markets/UNEMP-JUN26',
+      slug: 'UNEMP-JUN26',
     },
     {
-      id: 'AI-GPT5-2025',
-      question: 'OpenAI release GPT-5 in 2025?',
-      category: 'Technology',
-      yesPrice: 0.68,
-      noPrice: 0.33,
-      volume24h: 670_000,
-      liquidity: 230_000,
-      endDate: '2025-12-31',
-      url: 'https://kalshi.com/markets/AI-GPT5-2025',
-      slug: 'AI-GPT5-2025',
+      id: 'MIDTERMS-26-DEM',
+      question: 'Democrats win House majority in 2026 midterms?',
+      category: 'Politics',
+      yesPrice: 0.44,
+      noPrice: 0.57,
+      volume24h: 2_400_000,
+      liquidity: 890_000,
+      endDate: '2026-11-04',
+      url: 'https://kalshi.com/markets/MIDTERMS-26-DEM',
+      slug: 'MIDTERMS-26-DEM',
     },
     {
-      id: 'OIL-70-JUL',
-      question: 'Crude oil above $70 per barrel in July 2025?',
+      id: 'OIL-70-AUG26',
+      question: 'Crude oil above $70 per barrel end of August 2026?',
       category: 'Commodities',
-      yesPrice: 0.53,
-      noPrice: 0.49,
-      volume24h: 780_000,
-      liquidity: 290_000,
-      endDate: '2025-07-31',
-      url: 'https://kalshi.com/markets/OIL-70-JUL',
-      slug: 'OIL-70-JUL',
+      yesPrice: 0.48,
+      noPrice: 0.53,
+      volume24h: 830_000,
+      liquidity: 310_000,
+      endDate: '2026-08-31',
+      url: 'https://kalshi.com/markets/OIL-70-AUG26',
+      slug: 'OIL-70-AUG26',
     },
   ];
 
