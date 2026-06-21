@@ -129,43 +129,59 @@ function normalizeKalshiMarket(m: KalshiMarket): NormalizedMarket {
   };
 }
 
-async function fetchKalshiByCategory(category: string): Promise<KalshiMarket[]> {
-  const res = await fetch(
-    `${KALSHI_API}/markets?status=open&limit=200&category=${encodeURIComponent(category)}`,
-    { headers: { 'Content-Type': 'application/json' } },
-  );
-  if (!res.ok) return [];
-  const data: { markets: KalshiMarket[] } = await res.json();
-  return data.markets ?? [];
+interface KalshiEvent {
+  event_ticker: string;
+  title: string;
+  sub_title?: string;
+  category?: string;
+  status: string;
+  markets?: KalshiMarket[];
 }
-
-// Categories most likely to overlap with Polymarket
-const TARGET_CATEGORIES = ['economics', 'politics', 'crypto', 'financials', 'climate'];
 
 export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
   try {
-    // Fetch targeted categories in parallel — avoids the flood of KXMV sports combo markets
-    // that dominate unfiltered results. /markets is public, no auth required.
-    const batches = await Promise.all(
-      TARGET_CATEGORIES.map(cat => fetchKalshiByCategory(cat)),
+    // Use /events endpoint — returns topic-level groupings (Fed, Bitcoin, Politics)
+    // and avoids the KXMV combo market flood that dominates /markets.
+    const res = await fetch(
+      `${KALSHI_API}/events?status=open&limit=200&with_nested_markets=true`,
+      { headers: { 'Content-Type': 'application/json' } },
     );
 
-    const raw = batches.flat();
-    const seen = new Set<string>();
-    const unique = raw.filter(m => {
-      if (seen.has(m.ticker)) return false;
-      seen.add(m.ticker);
-      return m.status !== 'settled' && m.status !== 'determined' && m.status !== 'closed';
-    });
-
-    console.log(`[Kalshi] Fetched ${unique.length} markets across ${TARGET_CATEGORIES.join(', ')}`);
-
-    if (!unique.length) {
-      console.warn('[Kalshi] No markets returned for target categories — returning demo data');
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`[Kalshi] Events API error ${res.status}: ${body.slice(0, 200)}`);
       return getDemoKalshiMarkets();
     }
 
-    return unique.map(normalizeKalshiMarket);
+    const data: { events?: KalshiEvent[]; cursor?: string } = await res.json();
+    const events = data.events ?? [];
+    console.log(`[Kalshi] Fetched ${events.length} events`);
+
+    if (!events.length) {
+      console.warn('[Kalshi] No events returned — returning demo data');
+      return getDemoKalshiMarkets();
+    }
+
+    const markets: NormalizedMarket[] = [];
+    for (const event of events) {
+      // Skip KXMV combo/parlay events
+      if (event.event_ticker?.toUpperCase().startsWith('KXMV')) continue;
+      // Skip closed/settled events
+      if (event.status === 'settled' || event.status === 'determined' || event.status === 'closed') continue;
+
+      for (const m of event.markets ?? []) {
+        markets.push(normalizeKalshiMarket(m));
+      }
+    }
+
+    console.log(`[Kalshi] ${markets.length} markets from ${events.length} events (after KXMV filter)`);
+
+    if (!markets.length) {
+      console.warn('[Kalshi] All events were KXMV or had no markets — returning demo data');
+      return getDemoKalshiMarkets();
+    }
+
+    return markets;
   } catch (err) {
     console.error('[Kalshi] Request failed:', err instanceof Error ? err.message : err);
     return getDemoKalshiMarkets();
