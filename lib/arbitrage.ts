@@ -9,15 +9,24 @@
  * guaranteed profit regardless of outcome.
  */
 
-import { ArbitrageOpportunity, MarketPair } from './types';
+import { ArbitrageOpportunity, MarketPair, Platform } from './types';
 
-// Minimum profit to surface (fees eat into tiny spreads)
-const MIN_PROFIT_PCT = 0.005; // 0.5%
+// Platform exchange fees on payout — charged when you collect the $1 win.
+// Only ONE leg pays out (the one that resolves YES), so you pay ONE platform's fee.
+// Kalshi: ~3% on payout (verified at kalshi.com/fee-schedule — varies by market)
+// Polymarket: ~0% on payout (fees embedded in spread / protocol layer)
+// Update these if platforms change their schedules.
+const PAYOUT_FEE: Record<Platform, number> = {
+  kalshi:     0.03,  // 3% of $1.00 payout = $0.03 per contract
+  polymarket: 0.00,  // no explicit payout fee
+  ibkr:       0.00,  // placeholder
+};
+
+// Minimum NET profit after fees to surface an opportunity
+const MIN_NET_PROFIT_PCT = 0.005; // 0.5%
 // Maximum plausible profit — anything higher is almost certainly a false match
-// (mismatched questions that share keywords but ask different things)
 const MAX_PROFIT_PCT = 0.25; // 25%
-// Maximum end-date gap between matched markets (in days)
-// Wider window = different resolution criteria = not the same binary bet
+// Maximum end-date gap between matched markets
 const MAX_END_DATE_DIFF_DAYS = 730; // 2 years
 
 export function calculateArbitrage(pair: MarketPair): ArbitrageOpportunity | null {
@@ -50,13 +59,24 @@ export function calculateArbitrage(pair: MarketPair): ArbitrageOpportunity | nul
   }
 
   const combinedCost = best.yesPrice + best.noPrice;
-  const profitPct = (1 - combinedCost) / combinedCost;
+  const grossProfitPct = (1 - combinedCost) / combinedCost;
 
-  if (profitPct < MIN_PROFIT_PCT) return null;
-  if (profitPct > MAX_PROFIT_PCT) return null;
+  if (grossProfitPct > MAX_PROFIT_PCT) return null;
 
-  // Skip pairs where resolution dates differ significantly — different end dates mean
-  // the markets ask subtly different questions and the payoff structure differs.
+  // Fee is paid on the $1 payout, but only by the platform whose leg wins.
+  // In the worst case (fee on the more expensive platform), deduct the higher fee.
+  // Using max() ensures we never overstate net profit.
+  const worstCaseFee = Math.max(
+    PAYOUT_FEE[best.buyYesOn],
+    PAYOUT_FEE[best.buyNoOn],
+  );
+  // Net payout = $1 - fee; net profit = net payout - cost
+  const netProfit = (1 - worstCaseFee) - combinedCost;
+  const netProfitPct = netProfit / combinedCost;
+
+  if (netProfitPct < MIN_NET_PROFIT_PCT) return null;
+
+  // Skip pairs where resolution dates differ significantly.
   const dateA = new Date(marketA.endDate).getTime();
   const dateB = new Date(marketB.endDate).getTime();
   const diffDays = Math.abs(dateA - dateB) / (1000 * 60 * 60 * 24);
@@ -66,7 +86,7 @@ export function calculateArbitrage(pair: MarketPair): ArbitrageOpportunity | nul
     id: `${marketA.id}__${marketB.id}`,
     question: marketA.question,
     matchScore,
-    profitPct,
+    profitPct: netProfitPct,   // net of platform fees
     buyYesOn: best.buyYesOn,
     buyNoOn: best.buyNoOn,
     yesPrice: best.yesPrice,
