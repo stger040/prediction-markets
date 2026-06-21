@@ -29,7 +29,7 @@ export async function GET() {
     const pairs = findMarketPairs(kalshiMarkets, ibkrMarkets);
     const opportunities = rankOpportunities(pairs);
 
-    const usingDemoData = !process.env.KALSHI_EMAIL || !process.env.IBKR_HOST;
+    const usingDemoData = !process.env.KALSHI_API_KEY_ID || !process.env.IBKR_HOST;
 
     return NextResponse.json({
       opportunities,
