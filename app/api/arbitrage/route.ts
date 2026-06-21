@@ -32,7 +32,7 @@ export async function GET() {
         platformBName: 'Kalshi',
         pairsFound: pairs.length,
         opportunitiesFound: opportunities.length,
-        usingDemoData: kalshiMarkets.length === 6 && kalshiMarkets[0].id === 'FED-26JUL',
+        usingDemoData: kalshiMarkets.length <= 6 && kalshiMarkets[0]?.id === 'FED-26JUL',
         fetchedAt: new Date().toISOString(),
       },
     });

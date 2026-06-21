@@ -98,11 +98,20 @@ export function normalizeKalshiQuestion(title: string, subtitle: string): string
     .trim();
 }
 
+// Tickers containing these strings are multi-leg parlay markets — no Polymarket equivalent
+const KALSHI_PARLAY_PATTERNS = ['MULTIGAME', 'EXTENDED', 'PARLAY', 'COMBO'];
+
+function isKalshiParlay(ticker: string): boolean {
+  const t = ticker.toUpperCase();
+  return KALSHI_PARLAY_PATTERNS.some(p => t.includes(p));
+}
+
 export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
   try {
-    // /markets is a public endpoint — no auth headers required
+    // Fetch 500 to ensure we get enough single-outcome markets after filtering parlays.
+    // /markets is a public endpoint — no auth headers required.
     const res = await fetch(
-      `${KALSHI_API}/markets?status=open&limit=100`,
+      `${KALSHI_API}/markets?status=open&limit=500`,
       { headers: { 'Content-Type': 'application/json' } },
     );
 
@@ -114,44 +123,55 @@ export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
 
     const data: { markets: KalshiMarket[]; cursor?: string } = await res.json();
     const total = data.markets?.length ?? 0;
-    const statuses = [...new Set((data.markets ?? []).map(m => m.status))];
-    console.log(`[Kalshi] Fetched ${total} markets, statuses seen: ${statuses.join(', ')}`);
+    console.log(`[Kalshi] Fetched ${total} raw markets`);
 
     if (!data.markets?.length) {
       console.warn('[Kalshi] Empty markets array — returning demo data');
       return getDemoKalshiMarkets();
     }
 
-    return data.markets
-      .filter(m => m.status !== 'settled' && m.status !== 'determined' && m.status !== 'closed')
-      .map((m): NormalizedMarket => {
-        const subtitle = m.subtitle || m.yes_sub_title || '';
+    const filtered = data.markets.filter(m => {
+      // Drop settled/closed markets
+      if (m.status === 'settled' || m.status === 'determined' || m.status === 'closed') return false;
+      // Drop multi-leg parlay markets — they won't match any Polymarket question
+      if (isKalshiParlay(m.ticker)) return false;
+      return true;
+    });
 
-        // Prefer _dollars string fields; fall back to legacy cent integers
-        const yes = parsePrice(
-          m.yes_bid_dollars ?? m.yes_ask_dollars,
-          m.yes_bid ?? m.yes_ask,
-        );
-        const no = parsePrice(
-          m.no_bid_dollars ?? m.no_ask_dollars,
-          m.no_bid ?? m.no_ask,
-        );
+    console.log(`[Kalshi] ${filtered.length} markets after filtering parlays`);
 
-        return {
-          id: m.ticker,
-          platform: 'kalshi',
-          question: subtitle ? `${m.title}: ${subtitle}` : m.title,
-          normalizedQuestion: normalizeKalshiQuestion(m.title, subtitle),
-          category: m.category || 'General',
-          yesPrice: yes,
-          noPrice: no,
-          volume24h: (parseFloat(m.volume_24h_fp ?? '') || m.volume_24h) ?? m.volume ?? 0,
-          liquidity: (parseFloat(m.liquidity_dollars ?? '') || m.liquidity) ?? 0,
-          endDate: m.close_time,
-          url: `https://kalshi.com/markets/${m.ticker}`,
-          slug: m.ticker,
-        };
-      });
+    return filtered.map((m): NormalizedMarket => {
+      // Don't duplicate title in question when subtitle repeats it (some parlay remnants)
+      const subtitle = m.subtitle || m.yes_sub_title || '';
+      const question = (subtitle && subtitle !== m.title)
+        ? `${m.title}: ${subtitle}`
+        : m.title;
+
+      // Prefer _dollars string fields; fall back to legacy cent integers
+      const yes = parsePrice(
+        m.yes_bid_dollars ?? m.yes_ask_dollars,
+        m.yes_bid ?? m.yes_ask,
+      );
+      const no = parsePrice(
+        m.no_bid_dollars ?? m.no_ask_dollars,
+        m.no_bid ?? m.no_ask,
+      );
+
+      return {
+        id: m.ticker,
+        platform: 'kalshi',
+        question,
+        normalizedQuestion: normalizeKalshiQuestion(m.title, subtitle),
+        category: m.category || 'General',
+        yesPrice: yes,
+        noPrice: no,
+        volume24h: (parseFloat(m.volume_24h_fp ?? '') || m.volume_24h) ?? m.volume ?? 0,
+        liquidity: (parseFloat(m.liquidity_dollars ?? '') || m.liquidity) ?? 0,
+        endDate: m.close_time,
+        url: `https://kalshi.com/markets/${m.ticker}`,
+        slug: m.ticker,
+      };
+    });
   } catch (err) {
     console.error('[Kalshi] Request failed:', err instanceof Error ? err.message : err);
     return getDemoKalshiMarkets();
