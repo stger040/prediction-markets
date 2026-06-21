@@ -12,33 +12,37 @@
  */
 
 import { NormalizedMarket } from './types';
-import { sign, constants } from 'crypto';
+import { createSign, constants } from 'crypto';
 
 const KALSHI_BASE = 'https://external-api.kalshi.com';
 const KALSHI_API  = `${KALSHI_BASE}/trade-api/v2`;
 
-// Auth headers — only needed for portfolio/order endpoints, NOT for /markets
+// Auth headers — only needed for portfolio/order endpoints, NOT for /markets.
+// Signing follows the official Kalshi JS example exactly:
+//   createSign('RSA-SHA256') + RSA_PKCS1_PSS_PADDING + RSA_PSS_SALTLEN_DIGEST
 export function makeKalshiAuthHeaders(method: string, path: string): Record<string, string> {
-  const keyId    = process.env.KALSHI_API_KEY_ID ?? '';
-  const rawKey   = process.env.KALSHI_PRIVATE_KEY ?? '';
+  const keyId      = process.env.KALSHI_API_KEY_ID ?? '';
+  const rawKey     = process.env.KALSHI_PRIVATE_KEY ?? '';
   // Vercel may store multiline values with literal \n — restore real newlines
   const privateKey = rawKey.replace(/\\n/g, '\n');
 
-  const timestamp = Date.now().toString();
-  // Signing spec: timestamp + UPPERCASE_METHOD + full_path_no_query
+  const timestamp   = Date.now().toString();
+  // Message = timestamp + METHOD + path_without_query
   // e.g. "1703123456789GET/trade-api/v2/portfolio/balance"
   const pathNoQuery = path.split('?')[0];
-  const message     = timestamp + method.toUpperCase() + pathNoQuery;
+  const msgString   = timestamp + method.toUpperCase() + pathNoQuery;
 
-  const signature = sign(
-    'sha256',
-    Buffer.from(message),
+  const signer = createSign('RSA-SHA256');
+  signer.update(msgString);
+  signer.end();
+  const signature = signer.sign(
     {
       key: privateKey,
       padding: constants.RSA_PKCS1_PSS_PADDING,
       saltLength: constants.RSA_PSS_SALTLEN_DIGEST,
     },
-  ).toString('base64');
+    'base64',
+  );
 
   return {
     'Content-Type': 'application/json',
