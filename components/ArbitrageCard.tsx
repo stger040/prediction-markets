@@ -1,5 +1,5 @@
 'use client';
-import { ExternalLink, Lock, Zap } from 'lucide-react';
+import { ExternalLink, Lock, Zap, AlertCircle } from 'lucide-react';
 import { ArbitrageOpportunity, Platform } from '@/lib/types';
 import clsx from 'clsx';
 
@@ -7,6 +7,7 @@ interface ArbitrageCardProps {
   opportunity: ArbitrageOpportunity;
   rank: number;
   isBlurred: boolean;
+  isNearMiss?: boolean;
   onUpgrade: () => void;
   onExecute?: (opp: ArbitrageOpportunity) => void;
 }
@@ -37,14 +38,21 @@ const PLATFORM_STYLE: Record<Platform, {
   },
 };
 
-function ProfitBadge({ pct }: { pct: number }) {
+function ProfitBadge({ grossPct, netPct, isNearMiss }: { grossPct: number; netPct: number; isNearMiss?: boolean }) {
+  if (isNearMiss) {
+    return (
+      <span className="px-2.5 py-0.5 rounded-full text-sm font-bold border bg-gray-500/20 text-gray-400 border-gray-500/30">
+        +{(grossPct * 100).toFixed(2)}% gross
+      </span>
+    );
+  }
   const colorClass =
-    pct >= 0.05 ? 'bg-red-500/20 text-red-400 border-red-500/30' :
-    pct >= 0.02 ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' :
-                  'bg-green-500/20 text-green-400 border-green-500/30';
+    netPct >= 0.05 ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+    netPct >= 0.02 ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' :
+                     'bg-green-500/20 text-green-400 border-green-500/30';
   return (
     <span className={clsx('px-2.5 py-0.5 rounded-full text-sm font-bold border', colorClass)}>
-      +{(pct * 100).toFixed(2)}% profit
+      +{(netPct * 100).toFixed(2)}% net
     </span>
   );
 }
@@ -101,17 +109,24 @@ function formatVolume(v: number): string {
   return `$${(v / 1_000).toFixed(0)}k`;
 }
 
-export function ArbitrageCard({ opportunity: o, rank, isBlurred, onUpgrade, onExecute }: ArbitrageCardProps) {
+export function ArbitrageCard({ opportunity: o, rank, isBlurred, isNearMiss, onUpgrade, onExecute }: ArbitrageCardProps) {
   return (
     <div className={clsx(
       'relative rounded-2xl border bg-white/[0.03] p-4 transition-all',
-      isBlurred ? 'border-white/5' : 'border-white/10 hover:border-white/20',
+      isBlurred   ? 'border-white/5' :
+      isNearMiss  ? 'border-white/5 hover:border-white/10' :
+                    'border-white/10 hover:border-white/20',
     )}>
       {/* Header row */}
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-mono text-gray-600">#{rank}</span>
-          <ProfitBadge pct={o.profitPct} />
+          <ProfitBadge grossPct={o.grossProfitPct} netPct={o.netProfitPct} isNearMiss={isNearMiss} />
+          {isNearMiss && (
+            <span className="text-[10px] text-gray-500">
+              est. net {(o.netProfitPct * 100).toFixed(2)}% after ~3% Kalshi fee
+            </span>
+          )}
         </div>
         <div className="text-right shrink-0">
           <div className="text-xs text-gray-500">combined cost</div>
@@ -162,8 +177,8 @@ export function ArbitrageCard({ opportunity: o, rank, isBlurred, onUpgrade, onEx
         <span>{PLATFORM_STYLE[o.marketB.platform].label} vol: {formatVolume(o.marketB.volume24h)}</span>
       </div>
 
-      {/* Execute button */}
-      {onExecute && !isBlurred && (
+      {/* Execute button — only on confirmed opportunities, not near misses */}
+      {onExecute && !isBlurred && !isNearMiss && (
         <button
           onClick={() => onExecute(o)}
           className="mt-3 w-full py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 hover:border-amber-500/60 text-amber-400 text-xs font-bold transition-all flex items-center justify-center gap-1.5"

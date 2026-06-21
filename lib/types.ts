@@ -41,13 +41,15 @@ export interface PlaceOrderResult {
 export interface ArbitrageOpportunity {
   id: string;
   question: string;
-  matchScore: number;       // 0-1 confidence this is the same event
-  profitPct: number;        // e.g. 0.04 = 4% guaranteed profit
+  matchScore: number;         // 0-1 confidence this is the same event
+  grossProfitPct: number;     // profit before platform fees, e.g. 0.04 = 4%
+  netProfitPct: number;       // profit after worst-case payout fee
+  confirmedProfitable: boolean; // true when netProfitPct > MIN threshold
   buyYesOn: Platform;
   buyNoOn: Platform;
   yesPrice: number;
   noPrice: number;
-  combinedCost: number;     // yesPrice + noPrice; profit = 1 - combinedCost
+  combinedCost: number;       // yesPrice + noPrice
   marketA: NormalizedMarket;  // the platform you buy YES on
   marketB: NormalizedMarket;  // the platform you buy NO on
   updatedAt: string;
@@ -60,7 +62,8 @@ export interface MarketPair {
 }
 
 export interface ArbApiResponse {
-  opportunities: ArbitrageOpportunity[];
+  opportunities: ArbitrageOpportunity[];   // net profit > 0.5% after fees
+  nearMisses: ArbitrageOpportunity[];      // gross profit > 0.5%, wiped out by fees
   meta: {
     platformACount: number;
     platformBCount: number;
@@ -68,6 +71,8 @@ export interface ArbApiResponse {
     platformBName: string;
     pairsFound: number;
     opportunitiesFound: number;
+    nearMissCount: number;
+    kalshiFeeEstimate: number;             // e.g. 0.03 = 3% — verify per market
     usingDemoData: boolean;
     fetchedAt: string;
   };

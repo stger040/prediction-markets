@@ -6,12 +6,11 @@ import { NextResponse } from 'next/server';
 import { fetchPolymarketMarkets } from '@/lib/polymarket';
 import { fetchKalshiMarkets } from '@/lib/kalshi';
 import { findMarketPairs } from '@/lib/matcher';
-import { rankOpportunities } from '@/lib/arbitrage';
+import { rankOpportunities, PAYOUT_FEE } from '@/lib/arbitrage';
 
 export const dynamic = 'force-dynamic'; // never cache — always fresh prices
 
 export async function GET() {
-  // Log helps confirm the route is running fresh (force-dynamic)
   console.log('[arbitrage] Fetching live data at', new Date().toISOString());
 
   try {
@@ -21,10 +20,11 @@ export async function GET() {
     ]);
 
     const pairs = findMarketPairs(polymarkets, kalshiMarkets);
-    const opportunities = rankOpportunities(pairs);
+    const { opportunities, nearMisses } = rankOpportunities(pairs);
 
     return NextResponse.json({
       opportunities,
+      nearMisses,
       meta: {
         platformACount: polymarkets.length,
         platformBCount: kalshiMarkets.length,
@@ -32,6 +32,8 @@ export async function GET() {
         platformBName: 'Kalshi',
         pairsFound: pairs.length,
         opportunitiesFound: opportunities.length,
+        nearMissCount: nearMisses.length,
+        kalshiFeeEstimate: PAYOUT_FEE.kalshi,
         usingDemoData: kalshiMarkets.length <= 6 && kalshiMarkets[0]?.id === 'FED-26JUL',
         fetchedAt: new Date().toISOString(),
       },
