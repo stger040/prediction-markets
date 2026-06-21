@@ -1,17 +1,15 @@
 /**
  * Polymarket CLOB API client — order placement
  *
- * Required env vars:
- *   POLY_PRIVATE_KEY   — Ethereum wallet private key (0x-prefixed or raw hex)
- *   POLY_API_KEY       — L2 API key  (from polymarket.com → Profile → API)
- *   POLY_SECRET        — L2 API secret
- *   POLY_PASSPHRASE    — L2 API passphrase
+ * Required env var (only one!):
+ *   POLY_PRIVATE_KEY — Ethereum wallet private key (hex, with or without 0x prefix)
  *
- * How to get L2 credentials:
- *   1. Go to polymarket.com (use VPN if needed for browser access)
- *   2. Connect your wallet
- *   3. Profile → API → Generate API Key
- *   4. Copy the key/secret/passphrase into Vercel environment variables
+ * How to get it:
+ *   polymarket.com → Settings → Account tab → "Private key" → "Start Export"
+ *   Complete the export flow, copy the key, paste into Vercel env vars.
+ *
+ * The CLOB L2 credentials (key/secret/passphrase) are derived automatically
+ * from the private key on first use — no manual steps needed beyond the key.
  *
  * How orders work:
  *   Each market has a YES token and a NO token. To arb, we:
@@ -24,10 +22,10 @@
 import { ethers } from 'ethers';
 import { createHmac } from 'crypto';
 
-const CLOB_API  = 'https://clob.polymarket.com';
-const CHAIN_ID  = 137; // Polygon mainnet
+const CLOB_API = 'https://clob.polymarket.com';
+const CHAIN_ID = 137; // Polygon mainnet
 // CTF Exchange contract on Polygon (standard markets)
-const EXCHANGE  = '0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E';
+const EXCHANGE = '0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E';
 
 // EIP-712 typed data for the CTF Exchange Order struct
 const ORDER_TYPES: Record<string, { name: string; type: string }[]> = {
@@ -56,25 +54,50 @@ const EIP712_DOMAIN = {
 
 function getPolyWallet(): ethers.Wallet {
   const raw = process.env.POLY_PRIVATE_KEY ?? '';
-  if (!raw) throw new Error('POLY_PRIVATE_KEY is not set in environment variables');
-  // Accept with or without 0x prefix
+  if (!raw) throw new Error('POLY_PRIVATE_KEY is not set. Export it from polymarket.com → Settings → Account → Private key → Start Export');
   const pk = raw.startsWith('0x') ? raw : `0x${raw}`;
   return new ethers.Wallet(pk);
 }
 
-function getL2Creds(): { key: string; secret: string; passphrase: string } {
-  const key        = process.env.POLY_API_KEY    ?? '';
-  const secret     = process.env.POLY_SECRET     ?? '';
-  const passphrase = process.env.POLY_PASSPHRASE ?? '';
-  if (!key || !secret || !passphrase) {
-    throw new Error(
-      'Polymarket L2 credentials missing. Set POLY_API_KEY, POLY_SECRET, POLY_PASSPHRASE in Vercel env vars.',
-    );
+// Module-level cache for the derived L2 credentials (valid per process lifetime)
+let _cachedCreds: { key: string; secret: string; passphrase: string } | null = null;
+
+// Derive CLOB L2 credentials from the L1 (Ethereum wallet) private key.
+// This calls GET /auth/api-key with a personal_sign of the request message —
+// the same derivation the official Polymarket SDK uses internally.
+async function deriveL2Creds(
+  wallet: ethers.Wallet,
+): Promise<{ key: string; secret: string; passphrase: string }> {
+  if (_cachedCreds) return _cachedCreds;
+
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const method    = 'GET';
+  const path      = '/auth/api-key';
+
+  // L1 auth: Ethereum personal_sign of "${timestamp}${METHOD}${path}"
+  const msgBytes = ethers.toUtf8Bytes(`${timestamp}${method}${path}`);
+  const signature = await wallet.signMessage(msgBytes);
+
+  const res = await fetch(`${CLOB_API}${path}`, {
+    headers: {
+      'Content-Type':   'application/json',
+      'POLY-ADDRESS':   wallet.address,
+      'POLY-SIGNATURE': signature,
+      'POLY-TIMESTAMP': timestamp,
+      'POLY-NONCE':     '0',
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Polymarket credential derivation failed (${res.status}): ${text.slice(0, 200)}`);
   }
-  return { key, secret, passphrase };
+
+  _cachedCreds = await res.json() as { key: string; secret: string; passphrase: string };
+  return _cachedCreds;
 }
 
-// HMAC-SHA256 authentication headers for CLOB API requests
+// HMAC-SHA256 authentication headers for L2 CLOB API requests
 function makeClobHeaders(
   method: string,
   path: string,
@@ -84,18 +107,17 @@ function makeClobHeaders(
 ): Record<string, string> {
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const message   = timestamp + method.toUpperCase() + path + body;
-  // The secret is base64-encoded — decode it before using as HMAC key
-  const sigBuf    = createHmac('sha256', Buffer.from(creds.secret, 'base64'))
+  // Secret is base64-encoded — decode it before using as HMAC key
+  const sig = createHmac('sha256', Buffer.from(creds.secret, 'base64'))
     .update(message)
-    .digest();
-  const signature = sigBuf.toString('base64');
+    .digest('base64');
 
   return {
-    'Content-Type':   'application/json',
-    'POLY-ADDRESS':   address,
-    'POLY-API-KEY':   creds.key,
-    'POLY-SIGNATURE': signature,
-    'POLY-TIMESTAMP': timestamp,
+    'Content-Type':    'application/json',
+    'POLY-ADDRESS':    address,
+    'POLY-API-KEY':    creds.key,
+    'POLY-SIGNATURE':  sig,
+    'POLY-TIMESTAMP':  timestamp,
     'POLY-PASSPHRASE': creds.passphrase,
   };
 }
@@ -104,7 +126,7 @@ export interface PolyOrderParams {
   tokenId: string;    // clobTokenIds[0] for YES, clobTokenIds[1] for NO
   side: 'yes' | 'no';
   price: number;      // 0–1 (e.g. 0.35 = 35¢)
-  contracts: number;  // number of shares (integer)
+  contracts: number;  // integer number of shares to buy
 }
 
 export interface PolyOrderResult {
@@ -114,15 +136,13 @@ export interface PolyOrderResult {
 
 export async function placePolymarketOrder(params: PolyOrderParams): Promise<PolyOrderResult> {
   const wallet = getPolyWallet();
-  const creds  = getL2Creds();
+  const creds  = await deriveL2Creds(wallet);
 
-  // USDC has 6 decimals on Polygon
-  // BUY: makerAmount = USDC you pay = contracts × price × 1e6
-  //      takerAmount = shares you receive = contracts × 1e6
-  const price6 = Math.round(params.price * 1e6);
+  // BUY order:
+  //   makerAmount = USDC you pay = contracts × price (6 decimal places)
+  //   takerAmount = shares you receive = contracts (6 decimal places)
   const makerAmount = BigInt(Math.round(params.contracts * params.price * 1e6));
-  const takerAmount = BigInt(params.contracts * 1e6);
-  const side        = 0; // 0 = BUY (we always buy YES or NO for arb)
+  const takerAmount = BigInt(Math.round(params.contracts * 1e6));
 
   const orderData = {
     salt:          BigInt(Math.floor(Math.random() * 1e15)),
@@ -132,11 +152,11 @@ export async function placePolymarketOrder(params: PolyOrderParams): Promise<Pol
     tokenId:       BigInt(params.tokenId),
     makerAmount,
     takerAmount,
-    expiration:    BigInt(0),
+    expiration:    BigInt(0),  // no expiry
     nonce:         BigInt(0),
     feeRateBps:    BigInt(0),
-    side,
-    signatureType: 0, // 0 = EOA (regular wallet)
+    side:          0,          // 0 = BUY (we always buy the arb leg)
+    signatureType: 0,          // 0 = EOA (regular wallet)
   };
 
   const signature = await wallet.signTypedData(EIP712_DOMAIN, ORDER_TYPES, orderData);
@@ -181,7 +201,6 @@ export async function placePolymarketOrder(params: PolyOrderParams): Promise<Pol
 }
 
 // Look up CLOB token IDs for a market by conditionId
-// Falls back to empty strings if the market can't be found
 export async function fetchClobTokenIds(conditionId: string): Promise<[string, string] | null> {
   try {
     const res = await fetch(`${CLOB_API}/markets/${conditionId}`, {
