@@ -21,7 +21,7 @@ const MODE_DESCRIPTION: Record<AppMode, string> = {
 };
 
 export default function Home() {
-  const [mode, setMode] = useState<AppMode>('us');
+  const [mode, setMode] = useState<AppMode>('global');
   const [data, setData] = useState<ArbApiResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
