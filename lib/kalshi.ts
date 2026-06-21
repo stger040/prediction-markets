@@ -98,79 +98,74 @@ export function normalizeKalshiQuestion(title: string, subtitle: string): string
     .trim();
 }
 
-// All Kalshi multi-leg/parlay/combo markets use the KXMV prefix (KXM = Kalshi eXchange Markets)
-// e.g. KXMVESPORTSMULTIGAMEEXTENDED, KXMVECROSSCATEGORY, etc.
-// Simple binary markets use short meaningful tickers like FED-26JUL, BTC100K-26, etc.
-function isKalshiParlay(ticker: string): boolean {
-  return ticker.toUpperCase().startsWith('KXMV');
+function normalizeKalshiMarket(m: KalshiMarket): NormalizedMarket {
+  const subtitle = m.subtitle || m.yes_sub_title || '';
+  const question = (subtitle && subtitle !== m.title)
+    ? `${m.title}: ${subtitle}`
+    : m.title;
+
+  const yes = parsePrice(
+    m.yes_bid_dollars ?? m.yes_ask_dollars,
+    m.yes_bid ?? m.yes_ask,
+  );
+  const no = parsePrice(
+    m.no_bid_dollars ?? m.no_ask_dollars,
+    m.no_bid ?? m.no_ask,
+  );
+
+  return {
+    id: m.ticker,
+    platform: 'kalshi',
+    question,
+    normalizedQuestion: normalizeKalshiQuestion(m.title, subtitle),
+    category: m.category || 'General',
+    yesPrice: yes,
+    noPrice: no,
+    volume24h: (parseFloat(m.volume_24h_fp ?? '') || m.volume_24h) ?? m.volume ?? 0,
+    liquidity: (parseFloat(m.liquidity_dollars ?? '') || m.liquidity) ?? 0,
+    endDate: m.close_time,
+    url: `https://kalshi.com/markets/${m.ticker}`,
+    slug: m.ticker,
+  };
 }
+
+async function fetchKalshiByCategory(category: string): Promise<KalshiMarket[]> {
+  const res = await fetch(
+    `${KALSHI_API}/markets?status=open&limit=200&category=${encodeURIComponent(category)}`,
+    { headers: { 'Content-Type': 'application/json' } },
+  );
+  if (!res.ok) return [];
+  const data: { markets: KalshiMarket[] } = await res.json();
+  return data.markets ?? [];
+}
+
+// Categories most likely to overlap with Polymarket
+const TARGET_CATEGORIES = ['economics', 'politics', 'crypto', 'financials', 'climate'];
 
 export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
   try {
-    // Fetch 500 to ensure we get enough single-outcome markets after filtering parlays.
-    // /markets is a public endpoint — no auth headers required.
-    const res = await fetch(
-      `${KALSHI_API}/markets?status=open&limit=500`,
-      { headers: { 'Content-Type': 'application/json' } },
+    // Fetch targeted categories in parallel — avoids the flood of KXMV sports combo markets
+    // that dominate unfiltered results. /markets is public, no auth required.
+    const batches = await Promise.all(
+      TARGET_CATEGORIES.map(cat => fetchKalshiByCategory(cat)),
     );
 
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      console.error(`[Kalshi] API error ${res.status}: ${body.slice(0, 200)}`);
+    const raw = batches.flat();
+    const seen = new Set<string>();
+    const unique = raw.filter(m => {
+      if (seen.has(m.ticker)) return false;
+      seen.add(m.ticker);
+      return m.status !== 'settled' && m.status !== 'determined' && m.status !== 'closed';
+    });
+
+    console.log(`[Kalshi] Fetched ${unique.length} markets across ${TARGET_CATEGORIES.join(', ')}`);
+
+    if (!unique.length) {
+      console.warn('[Kalshi] No markets returned for target categories — returning demo data');
       return getDemoKalshiMarkets();
     }
 
-    const data: { markets: KalshiMarket[]; cursor?: string } = await res.json();
-    const total = data.markets?.length ?? 0;
-    console.log(`[Kalshi] Fetched ${total} raw markets`);
-
-    if (!data.markets?.length) {
-      console.warn('[Kalshi] Empty markets array — returning demo data');
-      return getDemoKalshiMarkets();
-    }
-
-    const filtered = data.markets.filter(m => {
-      // Drop settled/closed markets
-      if (m.status === 'settled' || m.status === 'determined' || m.status === 'closed') return false;
-      // Drop multi-leg parlay markets — they won't match any Polymarket question
-      if (isKalshiParlay(m.ticker)) return false;
-      return true;
-    });
-
-    console.log(`[Kalshi] ${filtered.length} markets after filtering parlays`);
-
-    return filtered.map((m): NormalizedMarket => {
-      // Don't duplicate title in question when subtitle repeats it (some parlay remnants)
-      const subtitle = m.subtitle || m.yes_sub_title || '';
-      const question = (subtitle && subtitle !== m.title)
-        ? `${m.title}: ${subtitle}`
-        : m.title;
-
-      // Prefer _dollars string fields; fall back to legacy cent integers
-      const yes = parsePrice(
-        m.yes_bid_dollars ?? m.yes_ask_dollars,
-        m.yes_bid ?? m.yes_ask,
-      );
-      const no = parsePrice(
-        m.no_bid_dollars ?? m.no_ask_dollars,
-        m.no_bid ?? m.no_ask,
-      );
-
-      return {
-        id: m.ticker,
-        platform: 'kalshi',
-        question,
-        normalizedQuestion: normalizeKalshiQuestion(m.title, subtitle),
-        category: m.category || 'General',
-        yesPrice: yes,
-        noPrice: no,
-        volume24h: (parseFloat(m.volume_24h_fp ?? '') || m.volume_24h) ?? m.volume ?? 0,
-        liquidity: (parseFloat(m.liquidity_dollars ?? '') || m.liquidity) ?? 0,
-        endDate: m.close_time,
-        url: `https://kalshi.com/markets/${m.ticker}`,
-        slug: m.ticker,
-      };
-    });
+    return unique.map(normalizeKalshiMarket);
   } catch (err) {
     console.error('[Kalshi] Request failed:', err instanceof Error ? err.message : err);
     return getDemoKalshiMarkets();
