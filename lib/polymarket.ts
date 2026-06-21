@@ -103,10 +103,12 @@ function normalizeMarket(m: PolymarketMarket): NormalizedMarket {
 }
 
 export async function fetchPolymarketMarkets(): Promise<NormalizedMarket[]> {
-  // Gamma API caps at 100 per request — fetch 4 pages in parallel to get 400 markets.
+  // Gamma API caps at 100 per request — fetch 12 pages in parallel to reach ~1200 markets.
   // Top 100 by volume are often dominated by a single event (e.g. World Cup 2026);
-  // pages 2-4 expose the economics/politics/crypto markets that Kalshi also covers.
-  const pages = await Promise.all([0, 100, 200, 300].map(fetchPage));
+  // pages 2-12 expose the economics/politics/crypto markets that Kalshi also covers.
+  const pages = await Promise.all(
+    [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100].map(fetchPage)
+  );
   const raw = pages.flat();
 
   // Deduplicate by id
