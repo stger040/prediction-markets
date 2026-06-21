@@ -1,44 +1,38 @@
 /**
- * Kalshi API client — uses RSA API key authentication (v2).
+ * Kalshi API client — RSA-PSS API key authentication.
  *
- * SETUP:
- * 1. Go to kalshi.com → Settings → API Keys → Create Key
- * 2. Copy the Key ID (a UUID) → KALSHI_API_KEY_ID
- * 3. Download or copy the private key (.txt file) → KALSHI_PRIVATE_KEY
- *
- * In Vercel dashboard → Settings → Environment Variables:
- *   KALSHI_API_KEY_ID  = your-key-id-uuid
- *   KALSHI_PRIVATE_KEY = (paste the full contents of your .txt private key file)
+ * SETUP (Vercel dashboard → Settings → Environment Variables):
+ *   KALSHI_API_KEY_ID  = your key UUID from kalshi.com → Settings → API Keys
+ *   KALSHI_PRIVATE_KEY = full contents of the .txt private key file Kalshi gave you
  *
  * Without these, the app returns demo data so the UI is still visible.
  */
 
 import { NormalizedMarket } from './types';
-import { createSign, constants } from 'crypto';
+import { sign, constants } from 'crypto';
 
-const KALSHI_API = 'https://trading-api.kalshi.com/trade-api/v2';
+const KALSHI_BASE = 'https://trading-api.kalshi.com';
+const KALSHI_API  = `${KALSHI_BASE}/trade-api/v2`;
 
 function makeAuthHeaders(method: string, path: string): Record<string, string> {
-  const keyId = process.env.KALSHI_API_KEY_ID ?? '';
-  const rawKey = process.env.KALSHI_PRIVATE_KEY ?? '';
-  // Vercel may store multiline values with literal \n — restore real newlines
+  const keyId   = process.env.KALSHI_API_KEY_ID ?? '';
+  const rawKey  = process.env.KALSHI_PRIVATE_KEY ?? '';
+  // Vercel env vars may encode newlines as literal \n — restore real line breaks
   const privateKey = rawKey.replace(/\\n/g, '\n');
 
   const timestamp = Date.now().toString();
+  // Kalshi signing spec: timestamp + UPPERCASE_METHOD + full_path_no_query
   const message = timestamp + method.toUpperCase() + path;
 
-  const signer = createSign('SHA256');
-  signer.update(message);
-  signer.end();
-
-  const signature = signer.sign(
+  const signature = sign(
+    'sha256',
+    Buffer.from(message),
     {
       key: privateKey,
       padding: constants.RSA_PKCS1_PSS_PADDING,
       saltLength: constants.RSA_PSS_SALTLEN_DIGEST,
     },
-    'base64',
-  );
+  ).toString('base64');
 
   return {
     'Content-Type': 'application/json',
@@ -48,19 +42,41 @@ function makeAuthHeaders(method: string, path: string): Record<string, string> {
   };
 }
 
+// Kalshi market after fixed-point migration (Q1 2026):
+// Legacy integer cent fields (yes_bid, yes_ask, …) are replaced by
+// _dollars string fields (e.g. "0.5600"). We support both for safety.
 interface KalshiMarket {
   ticker: string;
   title: string;
   subtitle: string;
+  yes_sub_title?: string;
+  no_sub_title?: string;
   category: string;
-  yes_bid: number;  // in cents (0-100)
-  yes_ask: number;
-  no_bid: number;
-  no_ask: number;
-  volume: number;
-  liquidity: number;
-  close_time: string;
   status: string;
+  // Post fixed-point migration (preferred)
+  yes_bid_dollars?: string;
+  yes_ask_dollars?: string;
+  no_bid_dollars?: string;
+  no_ask_dollars?: string;
+  volume_fp?: string;
+  volume_24h_fp?: string;
+  liquidity_dollars?: string;
+  // Legacy cent fields (0–100 integers, still present in some responses)
+  yes_bid?: number;
+  yes_ask?: number;
+  no_bid?: number;
+  no_ask?: number;
+  volume?: number;
+  volume_24h?: number;
+  liquidity?: number;
+  close_time: string;
+  open_time?: string;
+}
+
+function parsePrice(dollars?: string, cents?: number): number {
+  if (dollars !== undefined) return parseFloat(dollars);
+  if (cents !== undefined) return cents / 100;
+  return 0.5;
 }
 
 export function normalizeKalshiQuestion(title: string, subtitle: string): string {
@@ -76,7 +92,7 @@ export function normalizeKalshiQuestion(title: string, subtitle: string): string
 }
 
 export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
-  const keyId = process.env.KALSHI_API_KEY_ID;
+  const keyId     = process.env.KALSHI_API_KEY_ID;
   const privateKey = process.env.KALSHI_PRIVATE_KEY;
 
   if (!keyId || !privateKey) {
@@ -91,28 +107,29 @@ export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
     });
 
     if (!res.ok) {
-      const body = await res.text();
-      console.error(`[Kalshi] API error ${res.status}: ${body}`);
+      const body = await res.text().catch(() => '');
+      console.error(`[Kalshi] API error ${res.status}: ${body.slice(0, 200)}`);
       return getDemoKalshiMarkets();
     }
 
-    const data: { markets: KalshiMarket[] } = await res.json();
+    const data: { markets: KalshiMarket[]; cursor?: string } = await res.json();
 
     return data.markets
       .filter(m => m.status === 'open')
       .map((m): NormalizedMarket => {
-        const yes = ((m.yes_bid + m.yes_ask) / 2) / 100;
-        const no = ((m.no_bid + m.no_ask) / 2) / 100;
+        const yes = parsePrice(m.yes_bid_dollars ?? m.yes_ask_dollars, m.yes_bid ?? m.yes_ask);
+        const no  = parsePrice(m.no_bid_dollars  ?? m.no_ask_dollars,  m.no_bid  ?? m.no_ask);
+        const subtitle = m.subtitle || m.yes_sub_title || '';
         return {
           id: m.ticker,
           platform: 'kalshi',
-          question: m.subtitle ? `${m.title}: ${m.subtitle}` : m.title,
-          normalizedQuestion: normalizeKalshiQuestion(m.title, m.subtitle),
+          question: subtitle ? `${m.title}: ${subtitle}` : m.title,
+          normalizedQuestion: normalizeKalshiQuestion(m.title, subtitle),
           category: m.category || 'General',
           yesPrice: yes,
           noPrice: no,
-          volume24h: m.volume ?? 0,
-          liquidity: m.liquidity ?? 0,
+          volume24h: (parseFloat(m.volume_24h_fp ?? '') || m.volume_24h) ?? m.volume ?? 0,
+          liquidity: (parseFloat(m.liquidity_dollars ?? '') || m.liquidity) ?? 0,
           endDate: m.close_time,
           url: `https://kalshi.com/markets/${m.ticker}`,
           slug: m.ticker,
@@ -124,7 +141,7 @@ export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
   }
 }
 
-// Realistic demo data (used when no API key is set)
+// Demo data (shown when no API key is configured)
 function getDemoKalshiMarkets(): NormalizedMarket[] {
   const demos: Array<Omit<NormalizedMarket, 'platform' | 'normalizedQuestion'> & { question: string }> = [
     {
