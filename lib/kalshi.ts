@@ -113,7 +113,9 @@ export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
     }
 
     const data: { markets: KalshiMarket[]; cursor?: string } = await res.json();
-    console.log(`[Kalshi] Fetched ${data.markets?.length ?? 0} live markets`);
+    const total = data.markets?.length ?? 0;
+    const statuses = [...new Set((data.markets ?? []).map(m => m.status))];
+    console.log(`[Kalshi] Fetched ${total} markets, statuses seen: ${statuses.join(', ')}`);
 
     if (!data.markets?.length) {
       console.warn('[Kalshi] Empty markets array — returning demo data');
@@ -121,7 +123,7 @@ export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
     }
 
     return data.markets
-      .filter(m => m.status === 'open')
+      .filter(m => m.status !== 'settled' && m.status !== 'determined' && m.status !== 'closed')
       .map((m): NormalizedMarket => {
         const subtitle = m.subtitle || m.yes_sub_title || '';
 
