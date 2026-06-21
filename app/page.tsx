@@ -5,7 +5,8 @@ import { ArbitrageCard, ArbitrageCardSkeleton } from '@/components/ArbitrageCard
 import { StatsBar } from '@/components/StatsBar';
 import { ModeToggle } from '@/components/ModeToggle';
 import { UpgradeModal } from '@/components/UpgradeModal';
-import { AppMode, ArbApiResponse } from '@/lib/types';
+import { TradeModal } from '@/components/TradeModal';
+import { AppMode, ArbApiResponse, ArbitrageOpportunity } from '@/lib/types';
 import { AlertCircle, TrendingUp } from 'lucide-react';
 
 const FREE_TIER_LIMIT = 3;
@@ -26,6 +27,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [tradeOpp, setTradeOpp] = useState<ArbitrageOpportunity | null>(null);
   const [isPro] = useState(false); // Replace with real auth check
 
   const fetchOpportunities = useCallback(async (currentMode: AppMode) => {
@@ -131,6 +133,7 @@ export default function Home() {
               rank={idx + 1}
               isBlurred={!isPro && idx >= FREE_TIER_LIMIT}
               onUpgrade={() => setShowUpgrade(true)}
+              onExecute={setTradeOpp}
             />
           ))}
         </div>
@@ -194,6 +197,7 @@ export default function Home() {
       </main>
 
       <UpgradeModal isOpen={showUpgrade} onClose={() => setShowUpgrade(false)} />
+      <TradeModal opportunity={tradeOpp} onClose={() => setTradeOpp(null)} />
     </>
   );
 }

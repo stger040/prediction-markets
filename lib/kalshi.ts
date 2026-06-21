@@ -156,6 +156,51 @@ export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
   }
 }
 
+export interface KalshiOrderParams {
+  ticker: string;
+  side: 'yes' | 'no';
+  contracts: number;       // integer, 1 contract = 1 share
+  priceCents: number;      // 0-100, e.g. 45 = $0.45/share
+  clientOrderId?: string;
+}
+
+export interface KalshiOrderResult {
+  orderId: string;
+  status: string;
+}
+
+export async function placeKalshiOrder(params: KalshiOrderParams): Promise<KalshiOrderResult> {
+  const path = '/trade-api/v2/portfolio/orders';
+  const headers = makeKalshiAuthHeaders('POST', path);
+
+  const body = {
+    ticker: params.ticker,
+    action: 'buy',
+    type: 'limit',
+    side: params.side,
+    count: params.contracts,
+    price: params.priceCents,
+    client_order_id: params.clientOrderId ?? `arb-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+  };
+
+  const res = await fetch(`${KALSHI_API}/portfolio/orders`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Kalshi order failed (${res.status}): ${text.slice(0, 300)}`);
+  }
+
+  const data = await res.json();
+  return {
+    orderId: data.order?.order_id ?? '',
+    status: data.order?.status ?? 'submitted',
+  };
+}
+
 // Demo data — only shown when the live API is unreachable
 function getDemoKalshiMarkets(): NormalizedMarket[] {
   const demos: Array<Omit<NormalizedMarket, 'platform' | 'normalizedQuestion'> & { question: string }> = [
