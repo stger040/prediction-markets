@@ -98,12 +98,11 @@ export function normalizeKalshiQuestion(title: string, subtitle: string): string
     .trim();
 }
 
-// Tickers containing these strings are multi-leg parlay markets — no Polymarket equivalent
-const KALSHI_PARLAY_PATTERNS = ['MULTIGAME', 'EXTENDED', 'PARLAY', 'COMBO'];
-
+// All Kalshi multi-leg/parlay/combo markets use the KXMV prefix (KXM = Kalshi eXchange Markets)
+// e.g. KXMVESPORTSMULTIGAMEEXTENDED, KXMVECROSSCATEGORY, etc.
+// Simple binary markets use short meaningful tickers like FED-26JUL, BTC100K-26, etc.
 function isKalshiParlay(ticker: string): boolean {
-  const t = ticker.toUpperCase();
-  return KALSHI_PARLAY_PATTERNS.some(p => t.includes(p));
+  return ticker.toUpperCase().startsWith('KXMV');
 }
 
 export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
