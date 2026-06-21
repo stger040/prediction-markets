@@ -21,6 +21,8 @@ interface PolymarketMarket {
   outcomePrices: string;   // JSON array e.g. '["0.65","0.35"]'
   outcomes: string;         // JSON array e.g. '["Yes","No"]'
   url: string;
+  conditionId?: string;
+  clobTokenIds?: string;   // JSON array e.g. '["12345","67890"]'
 }
 
 function parsePrice(outcomePrices: string, outcomes: string): { yes: number; no: number } {
@@ -70,6 +72,16 @@ export async function fetchPolymarketMarkets(): Promise<NormalizedMarket[]> {
     .filter(m => m.active && !m.closed && m.outcomePrices && m.outcomes)
     .map((m): NormalizedMarket => {
       const { yes, no } = parsePrice(m.outcomePrices, m.outcomes);
+
+      // Parse CLOB token IDs if available — [0]=YES token, [1]=NO token
+      let clobTokenIds: [string, string] | undefined;
+      if (m.clobTokenIds) {
+        try {
+          const ids: string[] = JSON.parse(m.clobTokenIds);
+          if (ids.length >= 2) clobTokenIds = [ids[0], ids[1]];
+        } catch { /* ignore */ }
+      }
+
       return {
         id: m.id,
         platform: 'polymarket',
@@ -83,6 +95,8 @@ export async function fetchPolymarketMarkets(): Promise<NormalizedMarket[]> {
         endDate: m.endDate,
         url: `https://polymarket.com/event/${m.slug}`,
         slug: m.slug,
+        conditionId: m.conditionId,
+        clobTokenIds,
       };
     });
 }

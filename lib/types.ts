@@ -15,6 +15,27 @@ export interface NormalizedMarket {
   endDate: string;
   url: string;
   slug: string;
+  // Polymarket-only fields for CLOB order placement
+  conditionId?: string;
+  clobTokenIds?: [string, string]; // [yesTokenId, noTokenId]
+}
+
+export interface OrderLeg {
+  platform: Platform;
+  ticker: string;          // Kalshi ticker or Polymarket conditionId
+  side: 'yes' | 'no';
+  price: number;           // 0-1
+  contracts: number;
+  estimatedCostUsd: number;
+  // Polymarket-specific
+  clobTokenId?: string;
+}
+
+export interface PlaceOrderResult {
+  platform: Platform;
+  orderId?: string;
+  status: string;
+  error?: string;
 }
 
 export interface ArbitrageOpportunity {

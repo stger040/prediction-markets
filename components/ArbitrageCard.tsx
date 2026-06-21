@@ -1,5 +1,5 @@
 'use client';
-import { ExternalLink, Lock } from 'lucide-react';
+import { ExternalLink, Lock, Zap } from 'lucide-react';
 import { ArbitrageOpportunity, Platform } from '@/lib/types';
 import clsx from 'clsx';
 
@@ -8,6 +8,7 @@ interface ArbitrageCardProps {
   rank: number;
   isBlurred: boolean;
   onUpgrade: () => void;
+  onExecute?: (opp: ArbitrageOpportunity) => void;
 }
 
 const PLATFORM_STYLE: Record<Platform, {
@@ -100,7 +101,7 @@ function formatVolume(v: number): string {
   return `$${(v / 1_000).toFixed(0)}k`;
 }
 
-export function ArbitrageCard({ opportunity: o, rank, isBlurred, onUpgrade }: ArbitrageCardProps) {
+export function ArbitrageCard({ opportunity: o, rank, isBlurred, onUpgrade, onExecute }: ArbitrageCardProps) {
   return (
     <div className={clsx(
       'relative rounded-2xl border bg-white/[0.03] p-4 transition-all',
@@ -160,6 +161,17 @@ export function ArbitrageCard({ opportunity: o, rank, isBlurred, onUpgrade }: Ar
         )}
         <span>{PLATFORM_STYLE[o.marketB.platform].label} vol: {formatVolume(o.marketB.volume24h)}</span>
       </div>
+
+      {/* Execute button */}
+      {onExecute && !isBlurred && (
+        <button
+          onClick={() => onExecute(o)}
+          className="mt-3 w-full py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 hover:border-amber-500/60 text-amber-400 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+        >
+          <Zap className="w-3.5 h-3.5" />
+          Execute Trade
+        </button>
+      )}
 
       {/* Paywall blur overlay */}
       {isBlurred && (

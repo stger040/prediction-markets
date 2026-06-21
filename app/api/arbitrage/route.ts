@@ -8,9 +8,12 @@ import { fetchKalshiMarkets } from '@/lib/kalshi';
 import { findMarketPairs } from '@/lib/matcher';
 import { rankOpportunities } from '@/lib/arbitrage';
 
-export const revalidate = 30;
+export const dynamic = 'force-dynamic'; // never cache — always fresh prices
 
 export async function GET() {
+  // Log helps confirm the route is running fresh (force-dynamic)
+  console.log('[arbitrage] Fetching live data at', new Date().toISOString());
+
   try {
     const [polymarkets, kalshiMarkets] = await Promise.all([
       fetchPolymarketMarkets(),
@@ -29,7 +32,7 @@ export async function GET() {
         platformBName: 'Kalshi',
         pairsFound: pairs.length,
         opportunitiesFound: opportunities.length,
-        usingDemoData: !process.env.KALSHI_EMAIL,
+        usingDemoData: kalshiMarkets.length === 6 && kalshiMarkets[0].id === 'FED-26JUL',
         fetchedAt: new Date().toISOString(),
       },
     });

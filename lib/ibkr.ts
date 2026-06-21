@@ -196,56 +196,57 @@ function inferCategory(question: string): string {
 function getDemoIBKRMarkets(): NormalizedMarket[] {
   const demos = [
     {
-      id: 'FXFOMC25JUL',
-      question: 'Federal Reserve rate cut — July 2025 FOMC meeting?',
+      id: 'FXFOMC26JUL',
+      question: 'Federal Reserve rate cut — July 2026 FOMC meeting?',
       category: 'Economics',
-      // Kalshi YES=0.62 — IBKR is slightly cheaper at 0.58 → arb exists
-      yesPrice: 0.58,
-      noPrice: 0.43,
-      endDate: '2025-07-31',
+      // Kalshi YES=0.38 — IBKR slightly different at 0.35 → arb on NO side
+      yesPrice: 0.35,
+      noPrice: 0.66,
+      endDate: '2026-07-30',
     },
     {
-      id: 'FXGDP25Q2',
-      question: 'US GDP growth positive in Q2 2025?',
+      id: 'FXGDP26Q2',
+      question: 'US GDP growth positive in Q2 2026?',
       category: 'Economics',
-      // Kalshi YES=0.71, IBKR NO=0.32 → combined=1.03, flip: IBKR YES=0.68, Kalshi NO=0.30 → 0.98 → 2% arb
-      yesPrice: 0.68,
-      noPrice: 0.32,
-      endDate: '2025-07-30',
+      // Kalshi YES=0.67 — IBKR YES=0.64 → buy IBKR YES + Kalshi NO(0.34) = 0.98 → 2% arb
+      yesPrice: 0.64,
+      noPrice: 0.37,
+      endDate: '2026-07-30',
     },
     {
-      id: 'FXBTC60K',
-      question: 'Will Bitcoin close above $60,000 on June 30 2025?',
+      id: 'FXBTC100K',
+      question: 'Will Bitcoin close above $100,000 end of July 2026?',
       category: 'Crypto',
-      // Kalshi YES=0.44 — IBKR YES=0.41 → IBKR YES is cheaper → buy IBKR YES + Kalshi NO(0.58) = 0.99 → 1% arb
-      yesPrice: 0.41,
-      noPrice: 0.61,
-      endDate: '2025-06-30',
+      // Kalshi YES=0.51 — IBKR YES=0.48 → buy IBKR YES + Kalshi NO(0.50) = 0.98 → 2% arb
+      yesPrice: 0.48,
+      noPrice: 0.53,
+      endDate: '2026-07-31',
     },
     {
-      id: 'FXUNEMP',
-      question: 'US unemployment rate stays below 4.5% — May 2025 report?',
+      id: 'FXUNEMP26',
+      question: 'US unemployment rate stays below 4.5% — June 2026 report?',
       category: 'Economics',
-      yesPrice: 0.79,
-      noPrice: 0.22,
-      endDate: '2025-06-07',
+      yesPrice: 0.72,
+      noPrice: 0.29,
+      endDate: '2026-07-02',
     },
     {
-      id: 'FXOIL70',
-      question: 'WTI Crude Oil price above $70/barrel end of July 2025?',
+      id: 'FXOIL7026',
+      question: 'WTI Crude Oil price above $70/barrel end of August 2026?',
       category: 'Commodities',
-      // Kalshi YES=0.53, NO=0.49 — IBKR YES=0.49, NO=0.52 → combined YES(IBKR)+NO(Kalshi)=0.49+0.49=0.98 → 2% arb
-      yesPrice: 0.49,
-      noPrice: 0.52,
-      endDate: '2025-07-31',
+      // Kalshi YES=0.48 — IBKR YES=0.45 → buy IBKR YES + Kalshi NO(0.53) = 0.98 → 2% arb
+      yesPrice: 0.45,
+      noPrice: 0.56,
+      endDate: '2026-08-31',
     },
     {
-      id: 'FXSP500',
-      question: 'S&P 500 above 5,500 at end of Q2 2025?',
-      category: 'Markets',
-      yesPrice: 0.55,
-      noPrice: 0.46,
-      endDate: '2025-06-30',
+      id: 'FXMIDTERMS26',
+      question: 'Democrats win House majority in 2026 midterm elections?',
+      category: 'Politics',
+      // Kalshi YES=0.44 — IBKR YES=0.41 → buy IBKR YES + Kalshi NO(0.57) = 0.98 → 2% arb
+      yesPrice: 0.41,
+      noPrice: 0.60,
+      endDate: '2026-11-04',
     },
   ];
 
