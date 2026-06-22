@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export function middleware(request: NextRequest) {
-  // Allow preflight CORS requests
+  // Allow preflight CORS requests and the health check without auth
   if (request.method === 'OPTIONS') return NextResponse.next();
+  if (request.nextUrl.pathname === '/api/health') return NextResponse.next();
 
   const expectedKey = process.env.MATCHER_API_KEY;
 
