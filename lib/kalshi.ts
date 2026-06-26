@@ -96,7 +96,11 @@ function expandPhrases(text: string): string {
     .replace(/\bspx\b/gi, 'spfivehundred')
     .replace(/artificial\s+intelligence/gi, 'artificialintelligence')
     .replace(/united\s+states/gi, 'unitedstates')
+    .replace(/\bu\.s\.a\.?\b/gi, 'unitedstates')
+    .replace(/\busa\b/gi, 'unitedstates')
     .replace(/united\s+kingdom/gi, 'unitedkingdom')
+    .replace(/\bu\.k\.?\b/gi, 'unitedkingdom')
+    .replace(/\buk\b/gi, 'unitedkingdom')
     .replace(/european\s+union/gi, 'europeanunion')
     .replace(/\bgop\b/gi, 'republican')
     .replace(/\bbtc\b/gi, 'bitcoin')
@@ -110,6 +114,8 @@ export function normalizeKalshiQuestion(title: string, subtitle: string): string
   const combined = subtitle ? `${title} ${subtitle}` : title;
   return expandPhrases(combined)
     .toLowerCase()
+    // Strip combining diacritics so "Türkiye" → "Turkiye"
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/\?$/, '')
     .replace(/will\s+/g, '')
     .replace(/the\s+/g, '')
@@ -118,11 +124,14 @@ export function normalizeKalshiQuestion(title: string, subtitle: string): string
     .trim();
 }
 
-function normalizeKalshiMarket(m: KalshiMarket): NormalizedMarket {
+// eventTitle: the parent event's title (e.g. "Turkiye vs USA") — critical for sports markets
+// whose individual outcome titles ("Turkiye", "USA", "Tie") are too short to match alone.
+function normalizeKalshiMarket(m: KalshiMarket, eventTitle = '', eventCategory?: string): NormalizedMarket {
   const subtitle = m.subtitle || m.yes_sub_title || '';
-  const question = (subtitle && subtitle !== m.title)
-    ? `${m.title}: ${subtitle}`
-    : m.title;
+  // Display question: "Event: Outcome" when they differ
+  const question = eventTitle && m.title !== eventTitle
+    ? `${eventTitle}: ${m.title}${subtitle && subtitle !== m.title ? ' - ' + subtitle : ''}`
+    : (subtitle && subtitle !== m.title ? `${m.title}: ${subtitle}` : m.title);
 
   const yes = parsePrice(
     m.yes_bid_dollars ?? m.yes_ask_dollars,
@@ -133,12 +142,17 @@ function normalizeKalshiMarket(m: KalshiMarket): NormalizedMarket {
     m.no_bid ?? m.no_ask,
   );
 
+  // Combine event title + market title + subtitle for rich matching context
+  const normalText = [eventTitle, m.title, subtitle]
+    .filter(Boolean)
+    .join(' ');
+
   return {
     id: m.ticker,
     platform: 'kalshi',
     question,
-    normalizedQuestion: normalizeKalshiQuestion(m.title, subtitle),
-    category: m.category || 'General',
+    normalizedQuestion: normalizeKalshiQuestion(normalText, ''),
+    category: eventCategory || m.category || 'General',
     yesPrice: yes,
     noPrice: no,
     volume24h: (parseFloat(m.volume_24h_fp ?? '') || m.volume_24h) ?? m.volume ?? 0,
@@ -202,7 +216,7 @@ export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
       if (event.event_ticker?.toUpperCase().startsWith('KXMV')) continue;
       if (event.status === 'settled' || event.status === 'determined' || event.status === 'closed') continue;
       for (const m of event.markets ?? []) {
-        markets.push(normalizeKalshiMarket(m));
+        markets.push(normalizeKalshiMarket(m, event.title, event.category));
       }
     }
 

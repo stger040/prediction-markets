@@ -22,7 +22,20 @@ const TOKEN_SYNONYMS: Record<string, string> = {
   'gop':      'republican',
   'democrat': 'democratic',
   'dems':     'democratic',
+  'usa':      'unitedstates',
+  'uk':       'unitedkingdom',
 };
+
+function canonicalCategory(raw: string): string {
+  const c = (raw || '').toLowerCase();
+  if (/sport|soccer|football|tennis|baseball|basketball|golf|hockey|cricket|rugby|world.?cup|mls|esport/.test(c)) return 'Sports';
+  if (/crypto|bitcoin|ethereum|blockchain|defi/.test(c)) return 'Crypto';
+  if (/elect|politi|geopolit|govern|democrat|republican|congress|senate/.test(c)) return 'Politics';
+  if (/financ|econom|market|stock|equit|commodit|trade|gdp|inflation|bond/.test(c)) return 'Finance';
+  if (/tech|science|ai|space|health|climat|weather/.test(c)) return 'Tech';
+  if (/cultur|entertainment|music|film|award/.test(c)) return 'Culture';
+  return 'Other';
+}
 
 function tokenize(text: string): string[] {
   return text
@@ -109,8 +122,12 @@ function scorePair(
   const numsB = extractNumbers(qB);
   const numOverlap = rawOverlap(numsA, numsB);
   const numPenalty = numsA.length > 0 && numsB.length > 0 && numOverlap < 0.3 ? 0.5 : 1.0;
-  const trig    = trigramSimilarity(qA, qB);
-  const idfOver = idfWeightedOverlap(tokA, tokB, idf);
+  const trig = trigramSimilarity(qA, qB);
+  // Max of forward/backward IDF overlap so short Kalshi outcome titles
+  // ("Turkiye") score well against long Polymarket questions.
+  const idfFwd  = idfWeightedOverlap(tokA, tokB, idf);
+  const idfBwd  = idfWeightedOverlap(tokB, tokA, idf);
+  const idfOver = Math.max(idfFwd, idfBwd);
   return Math.min(1, (trig * 0.3 + idfOver * 0.6 + numOverlap * 0.1) * numPenalty);
 }
 
@@ -158,13 +175,16 @@ export function findMarketPairs(
 
     let bestScore = MATCH_THRESHOLD;
     let bestIdx   = -1;
+    const catA    = canonicalCategory(mA.category);
 
     for (const j of candidates) {
-      const s = scorePair(
+      const base = scorePair(
         mA.normalizedQuestion, tokA,
         marketsB[j].normalizedQuestion, tokensB[j],
         idf,
       );
+      const catMatch = catA === canonicalCategory(marketsB[j].category) && catA !== 'Other';
+      const s = Math.min(1, base * (catMatch ? 1.15 : 1.0));
       if (s > bestScore) {
         bestScore = s;
         bestIdx   = j;

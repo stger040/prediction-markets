@@ -43,7 +43,22 @@ const TOKEN_SYNONYMS: Record<string, string> = {
   'gop':      'republican',
   'democrat': 'democratic',
   'dems':     'democratic',
+  'usa':      'unitedstates',
+  'uk':       'unitedkingdom',
 };
+
+// Map each platform's raw category string to a shared canonical label.
+// Used for a scoring boost when both markets share the same topic domain.
+function canonicalCategory(raw: string): string {
+  const c = (raw || '').toLowerCase();
+  if (/sport|soccer|football|tennis|baseball|basketball|golf|hockey|cricket|rugby|world.?cup|mls|esport/.test(c)) return 'Sports';
+  if (/crypto|bitcoin|ethereum|blockchain|defi/.test(c)) return 'Crypto';
+  if (/elect|politi|geopolit|govern|democrat|republican|congress|senate/.test(c)) return 'Politics';
+  if (/financ|econom|market|stock|equit|commodit|trade|gdp|inflation|bond/.test(c)) return 'Finance';
+  if (/tech|science|ai|space|health|climat|weather/.test(c)) return 'Tech';
+  if (/cultur|entertainment|music|film|award/.test(c)) return 'Culture';
+  return 'Other';
+}
 
 function tokenize(text: string): string[] {
   return text
@@ -138,8 +153,13 @@ function scorePair(
   // (e.g. "above $50k" vs "above $100k" should never match)
   const numPenalty = numsA.length > 0 && numsB.length > 0 && numOverlap < 0.3 ? 0.5 : 1.0;
 
-  const trig    = trigramSimilarity(qA, qB);
-  const idfOver = idfWeightedOverlap(tokA, tokB, idf);
+  const trig = trigramSimilarity(qA, qB);
+
+  // Use max(forward, backward) IDF overlap so short Kalshi outcome titles
+  // ("Turkiye") still score well against long Polymarket questions.
+  const idfFwd  = idfWeightedOverlap(tokA, tokB, idf);
+  const idfBwd  = idfWeightedOverlap(tokB, tokA, idf);
+  const idfOver = Math.max(idfFwd, idfBwd);
 
   // 30% trigram (wording similarity) + 60% IDF-weighted content overlap + 10% number match
   return Math.min(1, (trig * 0.3 + idfOver * 0.6 + numOverlap * 0.1) * numPenalty);
@@ -200,12 +220,17 @@ export function findMarketPairs(
     let bestScore = MATCH_THRESHOLD;
     let bestIdx   = -1;
 
+    const catA = canonicalCategory(mA.category);
+
     for (const j of candidates) {
-      const s = scorePair(
+      const base = scorePair(
         mA.normalizedQuestion, tokA,
         marketsB[j].normalizedQuestion, tokensB[j],
         idf,
       );
+      // 15% boost when both markets share the same topic domain
+      const catMatch = catA === canonicalCategory(marketsB[j].category) && catA !== 'Other';
+      const s = Math.min(1, base * (catMatch ? 1.15 : 1.0));
       if (s > bestScore) {
         bestScore = s;
         bestIdx   = j;

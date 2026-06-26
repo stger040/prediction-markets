@@ -47,7 +47,11 @@ function expandPhrases(text: string): string {
     .replace(/\bspx\b/gi, 'spfivehundred')
     .replace(/artificial\s+intelligence/gi, 'artificialintelligence')
     .replace(/united\s+states/gi, 'unitedstates')
+    .replace(/\bu\.s\.a\.?\b/gi, 'unitedstates')
+    .replace(/\busa\b/gi, 'unitedstates')
     .replace(/united\s+kingdom/gi, 'unitedkingdom')
+    .replace(/\bu\.k\.?\b/gi, 'unitedkingdom')
+    .replace(/\buk\b/gi, 'unitedkingdom')
     .replace(/european\s+union/gi, 'europeanunion')
     .replace(/\bgop\b/gi, 'republican')
     .replace(/\bbtc\b/gi, 'bitcoin')
@@ -57,10 +61,10 @@ function expandPhrases(text: string): string {
     .replace(/\bdoge\b/gi, 'dogecoin');
 }
 
-function normalizeQuestion(title: string, subtitle: string): string {
-  const combined = subtitle ? `${title} ${subtitle}` : title;
-  return expandPhrases(combined)
+function normalizeQuestion(text: string): string {
+  return expandPhrases(text)
     .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/\?$/, '')
     .replace(/will\s+/g, '')
     .replace(/the\s+/g, '')
@@ -69,11 +73,11 @@ function normalizeQuestion(title: string, subtitle: string): string {
     .trim();
 }
 
-function normalizeMarket(m: KalshiMarket): NormalizedMarket {
+function normalizeMarket(m: KalshiMarket, eventTitle = '', eventCategory?: string): NormalizedMarket {
   const subtitle = m.subtitle || m.yes_sub_title || '';
-  const question = (subtitle && subtitle !== m.title)
-    ? `${m.title}: ${subtitle}`
-    : m.title;
+  const question = eventTitle && m.title !== eventTitle
+    ? `${eventTitle}: ${m.title}${subtitle && subtitle !== m.title ? ' - ' + subtitle : ''}`
+    : (subtitle && subtitle !== m.title ? `${m.title}: ${subtitle}` : m.title);
 
   const yes = parsePrice(m.yes_bid_dollars ?? m.yes_ask_dollars, m.yes_bid ?? m.yes_ask);
   const no  = parsePrice(m.no_bid_dollars  ?? m.no_ask_dollars,  m.no_bid  ?? m.no_ask);
@@ -82,8 +86,8 @@ function normalizeMarket(m: KalshiMarket): NormalizedMarket {
     id: m.ticker,
     platform: 'kalshi',
     question,
-    normalizedQuestion: normalizeQuestion(m.title, subtitle),
-    category: m.category || 'General',
+    normalizedQuestion: normalizeQuestion([eventTitle, m.title, subtitle].filter(Boolean).join(' ')),
+    category: eventCategory || m.category || 'General',
     yesPrice: yes,
     noPrice: no,
     volume24h: (parseFloat(m.volume_24h_fp ?? '') || m.volume_24h) ?? 0,
@@ -134,7 +138,7 @@ export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
       if (event.event_ticker?.toUpperCase().startsWith('KXMV')) continue;
       if (event.status === 'settled' || event.status === 'determined' || event.status === 'closed') continue;
       for (const m of event.markets ?? []) {
-        markets.push(normalizeMarket(m));
+        markets.push(normalizeMarket(m, event.title, event.category));
       }
     }
 
