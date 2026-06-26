@@ -19,8 +19,8 @@ import { ArbApiResponse } from '@/lib/types';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
-export const KV_KEY = 'arb:opportunities';
-export const KV_TTL = 300; // 5 min — stale data expires rather than serving forever
+const KV_KEY = 'arb:opportunities';
+const KV_TTL = 300; // 5 min — stale data expires rather than serving forever
 
 export async function GET(req: Request) {
   // Auth: Vercel Cron injects this header automatically when CRON_SECRET is set.
