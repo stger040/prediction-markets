@@ -27,6 +27,7 @@ interface KalshiMarket {
 interface KalshiEvent {
   event_ticker: string;
   title: string;
+  sub_title?: string;
   category?: string;
   status: string;
   markets?: KalshiMarket[];
@@ -73,7 +74,7 @@ function normalizeQuestion(text: string): string {
     .trim();
 }
 
-function normalizeMarket(m: KalshiMarket, eventTitle = '', eventCategory?: string): NormalizedMarket {
+function normalizeMarket(m: KalshiMarket, eventTitle = '', eventCategory?: string, eventSubTitle = ''): NormalizedMarket {
   const subtitle = m.subtitle || m.yes_sub_title || '';
   const question = eventTitle && m.title !== eventTitle
     ? `${eventTitle}: ${m.title}${subtitle && subtitle !== m.title ? ' - ' + subtitle : ''}`
@@ -86,7 +87,7 @@ function normalizeMarket(m: KalshiMarket, eventTitle = '', eventCategory?: strin
     id: m.ticker,
     platform: 'kalshi',
     question,
-    normalizedQuestion: normalizeQuestion([eventTitle, m.title, subtitle].filter(Boolean).join(' ')),
+    normalizedQuestion: normalizeQuestion([eventSubTitle, eventTitle, m.title, subtitle].filter(Boolean).join(' ')),
     category: eventCategory || m.category || 'General',
     yesPrice: yes,
     noPrice: no,
@@ -138,7 +139,7 @@ export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
       if (event.event_ticker?.toUpperCase().startsWith('KXMV')) continue;
       if (event.status === 'settled' || event.status === 'determined' || event.status === 'closed') continue;
       for (const m of event.markets ?? []) {
-        markets.push(normalizeMarket(m, event.title, event.category));
+        markets.push(normalizeMarket(m, event.title, event.category, event.sub_title));
       }
     }
 

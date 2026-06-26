@@ -126,7 +126,8 @@ export function normalizeKalshiQuestion(title: string, subtitle: string): string
 
 // eventTitle: the parent event's title (e.g. "Turkiye vs USA") — critical for sports markets
 // whose individual outcome titles ("Turkiye", "USA", "Tie") are too short to match alone.
-function normalizeKalshiMarket(m: KalshiMarket, eventTitle = '', eventCategory?: string): NormalizedMarket {
+// eventSubTitle: e.g. "World Soccer Cup Group Stage" — adds tournament context for richer matching
+function normalizeKalshiMarket(m: KalshiMarket, eventTitle = '', eventCategory?: string, eventSubTitle = ''): NormalizedMarket {
   const subtitle = m.subtitle || m.yes_sub_title || '';
   // Display question: "Event: Outcome" when they differ
   const question = eventTitle && m.title !== eventTitle
@@ -142,8 +143,8 @@ function normalizeKalshiMarket(m: KalshiMarket, eventTitle = '', eventCategory?:
     m.no_bid ?? m.no_ask,
   );
 
-  // Combine event title + market title + subtitle for rich matching context
-  const normalText = [eventTitle, m.title, subtitle]
+  // Combine event sub_title + event title + market title + subtitle for maximum matching context
+  const normalText = [eventSubTitle, eventTitle, m.title, subtitle]
     .filter(Boolean)
     .join(' ');
 
@@ -216,7 +217,7 @@ export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
       if (event.event_ticker?.toUpperCase().startsWith('KXMV')) continue;
       if (event.status === 'settled' || event.status === 'determined' || event.status === 'closed') continue;
       for (const m of event.markets ?? []) {
-        markets.push(normalizeKalshiMarket(m, event.title, event.category));
+        markets.push(normalizeKalshiMarket(m, event.title, event.category, event.sub_title));
       }
     }
 

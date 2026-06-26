@@ -55,11 +55,11 @@ export async function GET(req: Request) {
       ...(q ? {
         searchHits: polyMatches.length,
         results: polyMatches.slice(0, 10).map(m => ({
-          question: m.question, yesPrice: m.yesPrice, noPrice: m.noPrice, slug: m.slug,
+          question: m.question, normalizedQuestion: m.normalizedQuestion, yesPrice: m.yesPrice, noPrice: m.noPrice, slug: m.slug,
         })),
       } : {
         sample: poly.slice(0, 3).map(m => ({
-          question: m.question, yesPrice: m.yesPrice, noPrice: m.noPrice, conditionId: m.conditionId ?? null,
+          question: m.question, normalizedQuestion: m.normalizedQuestion, yesPrice: m.yesPrice, noPrice: m.noPrice, conditionId: m.conditionId ?? null,
         })),
       }),
     },
@@ -70,11 +70,11 @@ export async function GET(req: Request) {
       ...(q ? {
         searchHits: kalshiMatches.length,
         results: kalshiMatches.slice(0, 10).map(m => ({
-          question: m.question, yesPrice: m.yesPrice, noPrice: m.noPrice, slug: m.slug,
+          question: m.question, normalizedQuestion: m.normalizedQuestion, yesPrice: m.yesPrice, noPrice: m.noPrice, slug: m.slug,
         })),
       } : {
         sample: kalshi.slice(0, 3).map(m => ({
-          question: m.question, yesPrice: m.yesPrice, noPrice: m.noPrice, slug: m.slug,
+          question: m.question, normalizedQuestion: m.normalizedQuestion, yesPrice: m.yesPrice, noPrice: m.noPrice, slug: m.slug,
         })),
       }),
     },
