@@ -12,7 +12,8 @@ import { fetchKalshiMarkets } from '@/lib/kalshi';
 import { findMarketPairs } from '@/lib/matcher';
 import { rankOpportunities, PAYOUT_FEE } from '@/lib/arbitrage';
 
-export const revalidate = 60; // ISR: regenerate at most once per minute
+export const dynamic = 'force-dynamic';
+export const maxDuration = 120; // give the matching pipeline enough time
 
 export async function GET() {
   try {
