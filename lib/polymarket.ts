@@ -75,6 +75,36 @@ export function normalizePolymarketQuestion(q: string): string {
     .trim();
 }
 
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+// Fetch with exponential backoff + jitter. Retries on 429 and 5xx; fails fast on other 4xx.
+async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 4): Promise<Response> {
+  let lastError: Error = new Error('No attempts made');
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      if (res.status === 429) {
+        const retryAfter = res.headers.get('Retry-After');
+        const wait = retryAfter ? parseInt(retryAfter) * 1000 : Math.min(500 * 2 ** attempt, 16_000);
+        const jitter = Math.random() * 200;
+        console.warn(`[Polymarket] Rate limited — waiting ${Math.round(wait + jitter)}ms (attempt ${attempt + 1}/${maxRetries})`);
+        await sleep(wait + jitter);
+        continue;
+      }
+      if (res.status >= 500) {
+        lastError = new Error(`HTTP ${res.status}`);
+        await sleep(Math.min(300 * 2 ** attempt, 8_000) + Math.random() * 100);
+        continue;
+      }
+      return res;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      await sleep(Math.min(300 * 2 ** attempt, 8_000) + Math.random() * 100);
+    }
+  }
+  throw lastError;
+}
+
 async function fetchPage(offset: number): Promise<PolymarketMarket[]> {
   const params = new URLSearchParams({
     active: 'true',
@@ -86,14 +116,14 @@ async function fetchPage(offset: number): Promise<PolymarketMarket[]> {
   });
 
   try {
-    const res = await fetch(`${GAMMA_API}/markets?${params}`, {
+    const res = await fetchWithRetry(`${GAMMA_API}/markets?${params}`, {
       headers: { 'Accept': 'application/json' },
-      next: { revalidate: 30 },
     });
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data) ? data : [];
-  } catch {
+  } catch (err) {
+    console.error(`[Polymarket] Page at offset ${offset} failed:`, err instanceof Error ? err.message : err);
     return [];
   }
 }
@@ -128,15 +158,21 @@ function normalizeMarket(m: PolymarketMarket): NormalizedMarket {
 }
 
 export async function fetchPolymarketMarkets(): Promise<NormalizedMarket[]> {
-  // Gamma API caps at 100 per request — fetch 12 pages in parallel to reach ~1200 markets.
-  // Top 100 by volume are often dominated by a single event (e.g. World Cup 2026);
-  // pages 2-12 expose the economics/politics/crypto markets that Kalshi also covers.
-  const pages = await Promise.all(
-    [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100].map(fetchPage)
-  );
-  const raw = pages.flat();
+  // Sequential pages with 150ms delay — avoids burst rate limiting.
+  // Stops early if a page returns fewer than 100 results (no more data).
+  const MAX_PAGES = 12;
+  const PAGE_DELAY_MS = 150;
+  const raw: PolymarketMarket[] = [];
+  let pagesFetched = 0;
 
-  // Deduplicate by id
+  for (let i = 0; i < MAX_PAGES; i++) {
+    if (i > 0) await sleep(PAGE_DELAY_MS);
+    const page = await fetchPage(i * 100);
+    pagesFetched++;
+    raw.push(...page);
+    if (page.length < 100) break; // partial page = no more data
+  }
+
   const seen = new Set<string>();
   const unique = raw.filter(m => {
     if (seen.has(m.id)) return false;
@@ -144,7 +180,7 @@ export async function fetchPolymarketMarkets(): Promise<NormalizedMarket[]> {
     return true;
   });
 
-  console.log(`[Polymarket] Fetched ${unique.length} unique markets across ${pages.length} pages`);
+  console.log(`[Polymarket] Fetched ${unique.length} unique markets across ${pagesFetched} pages`);
 
   if (!unique.length) throw new Error('Polymarket API returned no markets');
 

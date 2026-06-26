@@ -33,6 +33,35 @@ interface KalshiEvent {
   markets?: KalshiMarket[];
 }
 
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 4): Promise<Response> {
+  let lastError: Error = new Error('No attempts made');
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      if (res.status === 429) {
+        const retryAfter = res.headers.get('Retry-After');
+        const wait = retryAfter ? parseInt(retryAfter) * 1000 : Math.min(500 * 2 ** attempt, 16_000);
+        const jitter = Math.random() * 200;
+        console.warn(`[Kalshi] Rate limited — waiting ${Math.round(wait + jitter)}ms (attempt ${attempt + 1}/${maxRetries})`);
+        await sleep(wait + jitter);
+        continue;
+      }
+      if (res.status >= 500) {
+        lastError = new Error(`HTTP ${res.status}`);
+        await sleep(Math.min(300 * 2 ** attempt, 8_000) + Math.random() * 100);
+        continue;
+      }
+      return res;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      await sleep(Math.min(300 * 2 ** attempt, 8_000) + Math.random() * 100);
+    }
+  }
+  throw lastError;
+}
+
 function parsePrice(dollars?: string, cents?: number): number {
   if (dollars !== undefined && dollars !== '') return parseFloat(dollars);
   if (cents !== undefined) return cents / 100;
@@ -107,15 +136,22 @@ export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
 
   try {
     do {
+      if (page > 0) await sleep(100);
       const url = new URL(`${KALSHI_API}/events`);
       url.searchParams.set('status', 'open');
       url.searchParams.set('limit', '200');
       url.searchParams.set('with_nested_markets', 'true');
       if (cursor) url.searchParams.set('cursor', cursor);
 
-      const res = await fetch(url.toString(), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      let res: Response;
+      try {
+        res = await fetchWithRetry(url.toString(), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (err) {
+        console.error(`[Kalshi] Page ${page + 1} failed after retries:`, err instanceof Error ? err.message : err);
+        break;
+      }
 
       if (!res.ok) {
         console.error(`[Kalshi] Events API error ${res.status}`);
