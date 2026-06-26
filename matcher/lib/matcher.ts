@@ -11,12 +11,26 @@ const STOP_WORDS = new Set([
   'win', 'who', 'next', 'become', 'appointed',
 ]);
 
+const TOKEN_SYNONYMS: Record<string, string> = {
+  'btc':      'bitcoin',
+  'xbt':      'bitcoin',
+  'eth':      'ethereum',
+  'sol':      'solana',
+  'doge':     'dogecoin',
+  'fomc':     'centralbank',
+  'spx':      'spfivehundred',
+  'gop':      'republican',
+  'democrat': 'democratic',
+  'dems':     'democratic',
+};
+
 function tokenize(text: string): string[] {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
-    .filter(t => t.length > 1 && !STOP_WORDS.has(t));
+    .filter(t => t.length > 1 && !STOP_WORDS.has(t))
+    .map(t => TOKEN_SYNONYMS[t] ?? t);
 }
 
 function getTrigrams(text: string): Set<string> {

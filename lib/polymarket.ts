@@ -39,8 +39,27 @@ function parsePrice(outcomePrices: string, outcomes: string): { yes: number; no:
   }
 }
 
+function expandPhrases(text: string): string {
+  return text
+    .replace(/federal\s+reserve/gi, 'centralbank')
+    .replace(/\bfomc\b/gi, 'centralbank')
+    .replace(/\bfed\b(?=\s+rate|\s+cut|\s+hike|\s+pause|\s+pivot|\s+meeting|\s+decision)/gi, 'centralbank')
+    .replace(/s&p\s*500/gi, 'spfivehundred')
+    .replace(/\bspx\b/gi, 'spfivehundred')
+    .replace(/artificial\s+intelligence/gi, 'artificialintelligence')
+    .replace(/united\s+states/gi, 'unitedstates')
+    .replace(/united\s+kingdom/gi, 'unitedkingdom')
+    .replace(/european\s+union/gi, 'europeanunion')
+    .replace(/\bgop\b/gi, 'republican')
+    .replace(/\bbtc\b/gi, 'bitcoin')
+    .replace(/\bxbt\b/gi, 'bitcoin')
+    .replace(/\beth\b/gi, 'ethereum')
+    .replace(/\bsol\b(?=\s|$)/gi, 'solana')
+    .replace(/\bdoge\b/gi, 'dogecoin');
+}
+
 export function normalizePolymarketQuestion(q: string): string {
-  return q
+  return expandPhrases(q)
     .toLowerCase()
     .replace(/\?$/, '')
     .replace(/will\s+/g, '')

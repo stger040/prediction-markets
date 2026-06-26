@@ -38,9 +38,28 @@ function parsePrice(dollars?: string, cents?: number): number {
   return 0.5;
 }
 
+function expandPhrases(text: string): string {
+  return text
+    .replace(/federal\s+reserve/gi, 'centralbank')
+    .replace(/\bfomc\b/gi, 'centralbank')
+    .replace(/\bfed\b(?=\s+rate|\s+cut|\s+hike|\s+pause|\s+pivot|\s+meeting|\s+decision)/gi, 'centralbank')
+    .replace(/s&p\s*500/gi, 'spfivehundred')
+    .replace(/\bspx\b/gi, 'spfivehundred')
+    .replace(/artificial\s+intelligence/gi, 'artificialintelligence')
+    .replace(/united\s+states/gi, 'unitedstates')
+    .replace(/united\s+kingdom/gi, 'unitedkingdom')
+    .replace(/european\s+union/gi, 'europeanunion')
+    .replace(/\bgop\b/gi, 'republican')
+    .replace(/\bbtc\b/gi, 'bitcoin')
+    .replace(/\bxbt\b/gi, 'bitcoin')
+    .replace(/\beth\b/gi, 'ethereum')
+    .replace(/\bsol\b(?=\s|$)/gi, 'solana')
+    .replace(/\bdoge\b/gi, 'dogecoin');
+}
+
 function normalizeQuestion(title: string, subtitle: string): string {
   const combined = subtitle ? `${title} ${subtitle}` : title;
-  return combined
+  return expandPhrases(combined)
     .toLowerCase()
     .replace(/\?$/, '')
     .replace(/will\s+/g, '')
@@ -76,24 +95,42 @@ function normalizeMarket(m: KalshiMarket): NormalizedMarket {
 }
 
 export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
+  const allEvents: KalshiEvent[] = [];
+  let cursor: string | undefined;
+  let page = 0;
+  const MAX_PAGES = 15;
+
   try {
-    const res = await fetch(
-      `${KALSHI_API}/events?status=open&limit=200&with_nested_markets=true`,
-      { headers: { 'Content-Type': 'application/json' } },
-    );
+    do {
+      const url = new URL(`${KALSHI_API}/events`);
+      url.searchParams.set('status', 'open');
+      url.searchParams.set('limit', '200');
+      url.searchParams.set('with_nested_markets', 'true');
+      if (cursor) url.searchParams.set('cursor', cursor);
 
-    if (!res.ok) {
-      console.error(`[Kalshi] Events API error ${res.status}`);
-      return getDemoMarkets();
-    }
+      const res = await fetch(url.toString(), {
+        headers: { 'Content-Type': 'application/json' },
+      });
 
-    const data: { events?: KalshiEvent[] } = await res.json();
-    const events = data.events ?? [];
+      if (!res.ok) {
+        console.error(`[Kalshi] Events API error ${res.status}`);
+        break;
+      }
 
-    if (!events.length) return getDemoMarkets();
+      const data: { events?: KalshiEvent[]; cursor?: string } = await res.json();
+      const batch = data.events ?? [];
+      allEvents.push(...batch);
+      cursor = data.cursor || undefined;
+      page++;
+      console.log(`[Kalshi] Page ${page}: ${batch.length} events (cursor: ${cursor ? 'yes' : 'done'})`);
+    } while (cursor && page < MAX_PAGES);
+
+    console.log(`[Kalshi] Total: ${allEvents.length} events across ${page} page(s)`);
+
+    if (!allEvents.length) return getDemoMarkets();
 
     const markets: NormalizedMarket[] = [];
-    for (const event of events) {
+    for (const event of allEvents) {
       if (event.event_ticker?.toUpperCase().startsWith('KXMV')) continue;
       if (event.status === 'settled' || event.status === 'determined' || event.status === 'closed') continue;
       for (const m of event.markets ?? []) {
@@ -101,7 +138,7 @@ export async function fetchKalshiMarkets(): Promise<NormalizedMarket[]> {
       }
     }
 
-    console.log(`[Kalshi] ${markets.length} markets from ${events.length} events`);
+    console.log(`[Kalshi] ${markets.length} markets from ${allEvents.length} events (after KXMV filter)`);
     return markets.length ? markets : getDemoMarkets();
   } catch (err) {
     console.error('[Kalshi] Request failed:', err instanceof Error ? err.message : err);
