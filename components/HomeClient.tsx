@@ -69,7 +69,7 @@ export default function HomeClient({ isAdmin }: HomeClientProps) {
     setData(null);
     setSelectedCategory('All');
     fetchOpportunities(mode);
-    const interval = setInterval(() => fetchOpportunities(mode), 30_000);
+    const interval = setInterval(() => fetchOpportunities(mode), 10_000);
     return () => clearInterval(interval);
   }, [mode, fetchOpportunities]);
 
