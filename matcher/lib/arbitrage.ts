@@ -1,14 +1,22 @@
 import { ArbitrageOpportunity, MarketPair, Platform } from './types';
 
-export const PAYOUT_FEE: Record<Platform, number> = {
-  kalshi:     0.03,
-  polymarket: 0.00,
-  ibkr:       0.00,
-};
+// Per-contract taker fee: charged on entry, not payout.
+// Kalshi: 7% × P × (1-P)  |  Polymarket: 6.25% × P × (1-P)
+// Peaks at 50¢ contracts, drops toward 0¢/100¢ extremes.
+export function tradingFee(platform: Platform, price: number): number {
+  const p = Math.max(0, Math.min(1, price));
+  if (platform === 'kalshi')     return 0.07   * p * (1 - p);
+  if (platform === 'polymarket') return 0.0625 * p * (1 - p);
+  if (platform === 'ibkr')       return 0.0625 * p * (1 - p);
+  return 0;
+}
 
-const MIN_GROSS_PROFIT_PCT = 0.005;
-const MIN_NET_PROFIT_PCT   = 0.005;
-const MAX_PROFIT_PCT = 0.25;
+export const TOTAL_FEE_AT_MID =
+  tradingFee('kalshi', 0.5) + tradingFee('polymarket', 0.5); // ≈ 0.0331
+
+const MIN_GROSS_PROFIT_PCT   = 0.005;
+const MIN_NET_PROFIT_PCT     = 0.005;
+const MAX_PROFIT_PCT         = 0.25;
 const MAX_END_DATE_DIFF_DAYS = 730;
 
 export function calculateArbitrage(pair: MarketPair): ArbitrageOpportunity | null {
@@ -40,19 +48,21 @@ export function calculateArbitrage(pair: MarketPair): ArbitrageOpportunity | nul
     }
   }
 
-  const combinedCost    = best.yesPrice + best.noPrice;
-  const grossProfitPct  = (1 - combinedCost) / combinedCost;
+  const combinedCost   = best.yesPrice + best.noPrice;
+  const grossProfitPct = (1 - combinedCost) / combinedCost;
 
   if (grossProfitPct < MIN_GROSS_PROFIT_PCT) return null;
-  if (grossProfitPct > MAX_PROFIT_PCT) return null;
+  if (grossProfitPct > MAX_PROFIT_PCT)       return null;
 
   const dateA    = new Date(marketA.endDate).getTime();
   const dateB    = new Date(marketB.endDate).getTime();
   const diffDays = Math.abs(dateA - dateB) / (1000 * 60 * 60 * 24);
   if (diffDays > MAX_END_DATE_DIFF_DAYS) return null;
 
-  const worstCaseFee  = Math.max(PAYOUT_FEE[best.buyYesOn], PAYOUT_FEE[best.buyNoOn]);
-  const netProfitPct  = ((1 - worstCaseFee) - combinedCost) / combinedCost;
+  const feeYes = tradingFee(best.buyYesOn, best.yesPrice);
+  const feeNo  = tradingFee(best.buyNoOn,  best.noPrice);
+  const totalFeeEstimate = feeYes + feeNo;
+  const netProfitPct = (1 - combinedCost - totalFeeEstimate) / combinedCost;
   const confirmedProfitable = netProfitPct >= MIN_NET_PROFIT_PCT;
 
   return {
@@ -61,6 +71,7 @@ export function calculateArbitrage(pair: MarketPair): ArbitrageOpportunity | nul
     matchScore,
     grossProfitPct,
     netProfitPct,
+    totalFeeEstimate,
     confirmedProfitable,
     buyYesOn: best.buyYesOn,
     buyNoOn:  best.buyNoOn,

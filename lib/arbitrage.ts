@@ -3,30 +3,37 @@
  *
  * Returns two lists:
  *   opportunities — net profit after platform fees is positive (actionable)
- *   nearMisses    — gross profit is positive but fee wipes it out; user should
- *                   verify the actual per-market fee on Kalshi before dismissing
+ *   nearMisses    — gross profit is positive but fees wipe it out
+ *
+ * Fee model (2026):
+ *   Kalshi taker:     0.07  × P × (1−P)  per contract  [CFTC-regulated exchange fee]
+ *   Polymarket taker: 0.0625 × P × (1−P) per contract  [CLOB taker fee]
+ *   Both fees are charged on ENTRY (when you place the order), not on payout.
+ *   The P×(1−P) shape means fees peak at 50¢ contracts and drop near 0¢/100¢.
+ *   We assume taker fills throughout since arb requires immediate execution.
  */
 
 import { ArbitrageOpportunity, MarketPair, Platform } from './types';
 
-// Platform exchange fees on payout — charged when you collect the $1 win.
-// Only ONE leg pays out per trade, so you pay ONE platform's fee.
-// Kalshi: ~3% on payout (kalshi.com/fee-schedule — varies by market, verify live)
-// Polymarket: ~0% (fees embedded in spread/protocol)
-export const PAYOUT_FEE: Record<Platform, number> = {
-  kalshi:     0.03,
-  polymarket: 0.00,
-  ibkr:       0.00,
-};
+// Per-contract taker fee charged on entry, as a function of the contract price P.
+// Source: Kalshi fee schedule 2026 (7% × P × (1-P)); Polymarket CLOB (6.25% × P × (1-P))
+export function tradingFee(platform: Platform, price: number): number {
+  const p = Math.max(0, Math.min(1, price));
+  if (platform === 'kalshi')     return 0.07   * p * (1 - p);
+  if (platform === 'polymarket') return 0.0625 * p * (1 - p);
+  if (platform === 'ibkr')       return 0.0625 * p * (1 - p); // ForecastEx, same model
+  return 0;
+}
 
-// Minimum GROSS profit to bother showing (below this the pair is noise)
-const MIN_GROSS_PROFIT_PCT = 0.005; // 0.5%
-// Minimum NET profit (after fees) to count as a confirmed opportunity
-const MIN_NET_PROFIT_PCT   = 0.005; // 0.5%
-// Maximum plausible profit — higher almost always means mismatched questions
-const MAX_PROFIT_PCT = 0.25;        // 25%
-// Maximum end-date gap between matched markets
-const MAX_END_DATE_DIFF_DAYS = 730; // 2 years
+// Representative total fee at the mid-price (P=0.5) — used for UI labels.
+// Kalshi: 0.07×0.25 = 1.75¢; Polymarket: 0.0625×0.25 = 1.5625¢; combined ≈ 3.31%
+export const TOTAL_FEE_AT_MID =
+  tradingFee('kalshi', 0.5) + tradingFee('polymarket', 0.5); // ≈ 0.0331
+
+const MIN_GROSS_PROFIT_PCT   = 0.005; // 0.5%
+const MIN_NET_PROFIT_PCT     = 0.005; // 0.5%
+const MAX_PROFIT_PCT         = 0.25;  // 25% — higher almost always means a mismatch
+const MAX_END_DATE_DIFF_DAYS = 730;   // 2 years
 
 export function calculateArbitrage(pair: MarketPair): ArbitrageOpportunity | null {
   const { marketA, marketB, matchScore } = pair;
@@ -57,23 +64,22 @@ export function calculateArbitrage(pair: MarketPair): ArbitrageOpportunity | nul
     }
   }
 
-  const combinedCost    = best.yesPrice + best.noPrice;
-  const grossProfitPct  = (1 - combinedCost) / combinedCost;
+  const combinedCost   = best.yesPrice + best.noPrice;
+  const grossProfitPct = (1 - combinedCost) / combinedCost;
 
-  // Reject noise and obvious false-matches
   if (grossProfitPct < MIN_GROSS_PROFIT_PCT) return null;
-  if (grossProfitPct > MAX_PROFIT_PCT) return null;
+  if (grossProfitPct > MAX_PROFIT_PCT)       return null;
 
-  // Skip pairs with very different resolution dates
   const dateA    = new Date(marketA.endDate).getTime();
   const dateB    = new Date(marketB.endDate).getTime();
   const diffDays = Math.abs(dateA - dateB) / (1000 * 60 * 60 * 24);
   if (diffDays > MAX_END_DATE_DIFF_DAYS) return null;
 
-  // Fee is paid only by the platform whose leg resolves as the winner.
-  // Worst-case: the higher-fee platform wins → deduct that fee.
-  const worstCaseFee  = Math.max(PAYOUT_FEE[best.buyYesOn], PAYOUT_FEE[best.buyNoOn]);
-  const netProfitPct  = ((1 - worstCaseFee) - combinedCost) / combinedCost;
+  // Taker fee on each leg at entry, computed from the actual price using platform formula.
+  const feeYes = tradingFee(best.buyYesOn, best.yesPrice);
+  const feeNo  = tradingFee(best.buyNoOn,  best.noPrice);
+  const totalFeeEstimate = feeYes + feeNo;
+  const netProfitPct = (1 - combinedCost - totalFeeEstimate) / combinedCost;
   const confirmedProfitable = netProfitPct >= MIN_NET_PROFIT_PCT;
 
   return {
@@ -82,6 +88,7 @@ export function calculateArbitrage(pair: MarketPair): ArbitrageOpportunity | nul
     matchScore,
     grossProfitPct,
     netProfitPct,
+    totalFeeEstimate,
     confirmedProfitable,
     buyYesOn: best.buyYesOn,
     buyNoOn:  best.buyNoOn,

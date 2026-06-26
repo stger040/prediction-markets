@@ -124,7 +124,7 @@ export function ArbitrageCard({ opportunity: o, rank, isBlurred, isNearMiss, onU
           <ProfitBadge grossPct={o.grossProfitPct} netPct={o.netProfitPct} isNearMiss={isNearMiss} />
           {isNearMiss && (
             <span className="text-[10px] text-gray-500">
-              est. net {(o.netProfitPct * 100).toFixed(2)}% after ~3% Kalshi fee
+              net {(o.netProfitPct * 100).toFixed(2)}% after ~{(o.totalFeeEstimate * 100).toFixed(2)}% fees
             </span>
           )}
         </div>
@@ -176,6 +176,14 @@ export function ArbitrageCard({ opportunity: o, rank, isBlurred, isNearMiss, onU
         )}
         <span>{PLATFORM_STYLE[o.marketB.platform].label} vol: {formatVolume(o.marketB.volume24h)}</span>
       </div>
+
+      {/* Fee breakdown — only on non-blurred confirmed opportunities */}
+      {!isBlurred && !isNearMiss && (
+        <div className="mt-2 text-[10px] text-gray-700 text-center">
+          Est. taker fees: {(o.totalFeeEstimate * 100).toFixed(2)}¢
+          {' '}· formula: 7%×P×(1−P) Kalshi + 6.25%×P×(1−P) Poly
+        </div>
+      )}
 
       {/* Execute button — only on confirmed opportunities, not near misses */}
       {onExecute && !isBlurred && !isNearMiss && (

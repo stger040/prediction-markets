@@ -41,17 +41,18 @@ export interface PlaceOrderResult {
 export interface ArbitrageOpportunity {
   id: string;
   question: string;
-  matchScore: number;         // 0-1 confidence this is the same event
-  grossProfitPct: number;     // profit before platform fees, e.g. 0.04 = 4%
-  netProfitPct: number;       // profit after worst-case payout fee
+  matchScore: number;           // 0-1 confidence this is the same event
+  grossProfitPct: number;       // profit before platform fees, e.g. 0.04 = 4%
+  netProfitPct: number;         // profit after taker fees on both legs
+  totalFeeEstimate: number;     // sum of both taker fees: 0.07×P×(1-P) + 0.0625×P×(1-P)
   confirmedProfitable: boolean; // true when netProfitPct > MIN threshold
   buyYesOn: Platform;
   buyNoOn: Platform;
   yesPrice: number;
   noPrice: number;
-  combinedCost: number;       // yesPrice + noPrice
-  marketA: NormalizedMarket;  // the platform you buy YES on
-  marketB: NormalizedMarket;  // the platform you buy NO on
+  combinedCost: number;         // yesPrice + noPrice (before fees)
+  marketA: NormalizedMarket;    // the platform you buy YES on
+  marketB: NormalizedMarket;    // the platform you buy NO on
   updatedAt: string;
 }
 

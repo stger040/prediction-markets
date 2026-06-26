@@ -69,7 +69,7 @@ export default function HomeClient({ isAdmin }: HomeClientProps) {
     setData(null);
     setSelectedCategory('All');
     fetchOpportunities(mode);
-    const interval = setInterval(() => fetchOpportunities(mode), 60_000);
+    const interval = setInterval(() => fetchOpportunities(mode), 30_000);
     return () => clearInterval(interval);
   }, [mode, fetchOpportunities]);
 
@@ -214,7 +214,7 @@ export default function HomeClient({ isAdmin }: HomeClientProps) {
               <div className="flex items-center gap-2 mb-3">
                 <div className="flex-1 h-px bg-white/5" />
                 <p className="text-xs text-gray-600 font-semibold uppercase tracking-wider px-2">
-                  Near Misses — Profitable before {((data?.meta.kalshiFeeEstimate ?? 0.03) * 100).toFixed(0)}% Kalshi fee
+                  Near Misses — Profitable before taker fees ({((data?.meta.kalshiFeeEstimate ?? 0.0175) * 100).toFixed(2)}¢/contract Kalshi at mid)
                 </p>
                 <div className="flex-1 h-px bg-white/5" />
               </div>

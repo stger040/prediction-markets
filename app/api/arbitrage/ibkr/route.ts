@@ -14,7 +14,7 @@ import { NextResponse } from 'next/server';
 import { fetchKalshiMarkets } from '@/lib/kalshi';
 import { fetchIBKRMarkets } from '@/lib/ibkr';
 import { findMarketPairs } from '@/lib/matcher';
-import { rankOpportunities, PAYOUT_FEE } from '@/lib/arbitrage';
+import { rankOpportunities, tradingFee } from '@/lib/arbitrage';
 
 export const dynamic = 'force-dynamic'; // Always fresh — never cache for live arb
 
@@ -42,7 +42,7 @@ export async function GET() {
         pairsFound: pairs.length,
         opportunitiesFound: opportunities.length,
         nearMissCount: nearMisses.length,
-        kalshiFeeEstimate: PAYOUT_FEE.kalshi,
+        kalshiFeeEstimate: tradingFee('kalshi', 0.5),
         usingDemoData,
         fetchedAt: new Date().toISOString(),
       },

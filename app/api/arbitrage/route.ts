@@ -12,7 +12,7 @@ import { ArbApiResponse } from '@/lib/types';
 import { fetchPolymarketMarkets } from '@/lib/polymarket';
 import { fetchKalshiMarkets } from '@/lib/kalshi';
 import { findMarketPairs } from '@/lib/matcher';
-import { rankOpportunities, PAYOUT_FEE } from '@/lib/arbitrage';
+import { rankOpportunities, tradingFee } from '@/lib/arbitrage';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,7 +58,7 @@ export async function GET() {
         pairsFound: pairs.length,
         opportunitiesFound: opportunities.length,
         nearMissCount: nearMisses.length,
-        kalshiFeeEstimate: PAYOUT_FEE.kalshi,
+        kalshiFeeEstimate: tradingFee('kalshi', 0.5), // representative at P=0.5: 1.75¢/contract
         usingDemoData: kalshiMarkets.length <= 6 && kalshiMarkets[0]?.id === 'FED-26JUL',
         fetchedAt: new Date().toISOString(),
       },

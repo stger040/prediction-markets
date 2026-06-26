@@ -23,6 +23,7 @@ export interface ArbitrageOpportunity {
   matchScore: number;
   grossProfitPct: number;
   netProfitPct: number;
+  totalFeeEstimate: number;
   confirmedProfitable: boolean;
   buyYesOn: Platform;
   buyNoOn: Platform;
