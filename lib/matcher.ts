@@ -140,11 +140,73 @@ function buildIdf(
   return idf;
 }
 
+// Jaro similarity — handles short strings and prefix matches better than trigrams.
+function jaro(s: string, t: string): number {
+  if (s === t) return 1;
+  const sLen = s.length;
+  const tLen = t.length;
+  if (sLen === 0 || tLen === 0) return 0;
+  const matchWindow = Math.floor(Math.max(sLen, tLen) / 2) - 1;
+  if (matchWindow < 0) return 0;
+  const sMatches = new Array<boolean>(sLen).fill(false);
+  const tMatches = new Array<boolean>(tLen).fill(false);
+  let matches = 0;
+  for (let i = 0; i < sLen; i++) {
+    const start = Math.max(0, i - matchWindow);
+    const end   = Math.min(i + matchWindow + 1, tLen);
+    for (let j = start; j < end; j++) {
+      if (tMatches[j] || s[i] !== t[j]) continue;
+      sMatches[i] = true;
+      tMatches[j] = true;
+      matches++;
+      break;
+    }
+  }
+  if (matches === 0) return 0;
+  let transpositions = 0;
+  let k = 0;
+  for (let i = 0; i < sLen; i++) {
+    if (!sMatches[i]) continue;
+    while (!tMatches[k]) k++;
+    if (s[i] !== t[k]) transpositions++;
+    k++;
+  }
+  return (matches / sLen + matches / tLen + (matches - transpositions / 2) / matches) / 3;
+}
+
+// Jaro-Winkler boosts scores for strings sharing a common prefix (up to 4 chars).
+function jaroWinkler(s: string, t: string): number {
+  const j = jaro(s, t);
+  let prefix = 0;
+  for (let i = 0; i < Math.min(4, s.length, t.length); i++) {
+    if (s[i] === t[i]) prefix++;
+    else break;
+  }
+  return j + prefix * 0.1 * (1 - j);
+}
+
+// Returns 1.0 for same-day, grading down to 0 for markets > 90 days apart.
+// Unknown dates (empty/unparseable) return 0.5 — neutral, not penalised.
+function dateSimilarity(dateA: string, dateB: string): number {
+  if (!dateA || !dateB) return 0.5;
+  const msA = Date.parse(dateA);
+  const msB = Date.parse(dateB);
+  if (isNaN(msA) || isNaN(msB)) return 0.5;
+  const days = Math.abs(msA - msB) / 86_400_000;
+  if (days <= 1)  return 1.0;
+  if (days <= 7)  return 0.85;
+  if (days <= 30) return 0.6;
+  if (days <= 90) return 0.3;
+  return 0.0;
+}
+
 function scorePair(
-  qA: string, tokA: string[],
-  qB: string, tokB: string[],
+  mA: NormalizedMarket, tokA: string[],
+  mB: NormalizedMarket, tokB: string[],
   idf: Map<string, number>,
 ): number {
+  const qA = mA.normalizedQuestion;
+  const qB = mB.normalizedQuestion;
   const numsA = extractNumbers(qA);
   const numsB = extractNumbers(qB);
   const numOverlap = rawOverlap(numsA, numsB);
@@ -154,6 +216,7 @@ function scorePair(
   const numPenalty = numsA.length > 0 && numsB.length > 0 && numOverlap < 0.3 ? 0.5 : 1.0;
 
   const trig = trigramSimilarity(qA, qB);
+  const jw   = jaroWinkler(qA, qB);
 
   // Use max(forward, backward) IDF overlap so short Kalshi outcome titles
   // ("Turkiye") still score well against long Polymarket questions.
@@ -161,22 +224,29 @@ function scorePair(
   const idfBwd  = idfWeightedOverlap(tokB, tokA, idf);
   const idfOver = Math.max(idfFwd, idfBwd);
 
-  // 30% trigram (wording similarity) + 60% IDF-weighted content overlap + 10% number match
-  return Math.min(1, (trig * 0.3 + idfOver * 0.6 + numOverlap * 0.1) * numPenalty);
+  // Text: 20% trigram + 60% IDF-weighted overlap + 20% Jaro-Winkler
+  const textScore = (trig * 0.20 + idfOver * 0.60 + jw * 0.20) * numPenalty;
+
+  // 15% date proximity — markets expiring months apart are almost certainly different events
+  const dateSim = dateSimilarity(mA.endDate, mB.endDate);
+
+  return Math.min(1, textScore * 0.85 + dateSim * 0.15);
 }
 
 // Exported for unit tests / one-off scoring without a full corpus IDF.
 export function scoreMarketMatch(a: NormalizedMarket, b: NormalizedMarket): number {
   const tokA = tokenize(a.normalizedQuestion);
   const tokB = tokenize(b.normalizedQuestion);
-  // No IDF context — fall back to raw overlap (legacy behaviour)
   const overlap = rawOverlap(tokA, tokB);
   const numsA   = extractNumbers(a.normalizedQuestion);
   const numsB   = extractNumbers(b.normalizedQuestion);
   const numOver = rawOverlap(numsA, numsB);
   const numPenalty = numsA.length > 0 && numsB.length > 0 && numOver < 0.3 ? 0.5 : 1.0;
   const trig    = trigramSimilarity(a.normalizedQuestion, b.normalizedQuestion);
-  return Math.min(1, (trig * 0.3 + overlap * 0.6 + numOver * 0.1) * numPenalty);
+  const jw      = jaroWinkler(a.normalizedQuestion, b.normalizedQuestion);
+  const dateSim = dateSimilarity(a.endDate, b.endDate);
+  const textScore = (trig * 0.20 + overlap * 0.60 + jw * 0.20) * numPenalty;
+  return Math.min(1, textScore * 0.85 + dateSim * 0.15);
 }
 
 export function findMarketPairs(
@@ -224,8 +294,8 @@ export function findMarketPairs(
 
     for (const j of candidates) {
       const base = scorePair(
-        mA.normalizedQuestion, tokA,
-        marketsB[j].normalizedQuestion, tokensB[j],
+        mA, tokA,
+        marketsB[j], tokensB[j],
         idf,
       );
       // 15% boost when both markets share the same topic domain
