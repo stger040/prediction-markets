@@ -5,6 +5,8 @@ export function middleware(request: NextRequest) {
   // Allow preflight CORS requests and the health check without auth
   if (request.method === 'OPTIONS') return NextResponse.next();
   if (request.nextUrl.pathname === '/api/health') return NextResponse.next();
+  // Cron route handles its own auth via CRON_SECRET — don't block it here
+  if (request.nextUrl.pathname.startsWith('/api/cron/')) return NextResponse.next();
 
   const expectedKey = process.env.MATCHER_API_KEY;
 
